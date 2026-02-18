@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useComms } from '../../services/comms';
 import { GameState, GamePhase, CommsMessage } from '../../types';
 import { Circle, User, Trophy, Lock, Hash, ArrowLeft } from 'lucide-react';
@@ -37,13 +37,27 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode 
     setJoined(true);
   };
 
-  // When connection opens after clicking Join, send the join message
-  // We use a useEffect here to watch for the connection status
-  React.useEffect(() => {
+  // Initial Join Request
+  useEffect(() => {
     if (joined && isConnected && name) {
         sendMessage({ type: 'PLAYER_JOIN', payload: { id: playerId, name } });
     }
-  }, [joined, isConnected, name, playerId]);
+  }, [joined, isConnected, name, playerId, sendMessage]);
+
+  // Self-Healing: Retry Join if we are connected but host doesn't list us
+  // This fixes the "Zombie Player" bug where buzzer works but name is missing
+  useEffect(() => {
+    if (joined && isConnected && gameState && name) {
+        const amIRegistered = gameState.players.some(p => p.id === playerId);
+        if (!amIRegistered) {
+            console.log("Host doesn't have me in list yet, retrying join...");
+            const timeout = setTimeout(() => {
+                sendMessage({ type: 'PLAYER_JOIN', payload: { id: playerId, name } });
+            }, 2000); 
+            return () => clearTimeout(timeout);
+        }
+    }
+  }, [joined, isConnected, gameState, name, playerId, sendMessage]);
 
   const handleBuzz = () => {
     if (!gameState) return;

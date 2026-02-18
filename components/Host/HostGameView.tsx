@@ -416,7 +416,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                     <div className="space-y-2 animate-in slide-in-from-bottom duration-200">
                         <div className="text-center bg-gray-900 p-2 rounded border border-gray-700 mb-2">
                             <span className="text-gray-400 text-xs uppercase">Buzzed In:</span>
-                            <div className="text-xl font-bold text-white truncate">{players.find(p => p.id === buzzedPlayerId)?.name}</div>
+                            <div className="text-xl font-bold text-white truncate">
+                                {players.find(p => p.id === buzzedPlayerId)?.name || 'Unknown Player'}
+                            </div>
                         </div>
                         <div className="flex gap-2">
                             <button 

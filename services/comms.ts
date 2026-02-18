@@ -36,7 +36,11 @@ export const useComms = (
 
     peer.on('open', (id) => {
       console.log('My Peer ID is: ' + id);
-      setIsConnected(true);
+      
+      // HOST is ready immediately upon peer open
+      if (role === 'HOST') {
+        setIsConnected(true);
+      }
 
       if (role === 'PLAYER') {
         // Connect to Host
@@ -46,6 +50,8 @@ export const useComms = (
         conn.on('open', () => {
           console.log("Connected to Host");
           hostConnRef.current = conn;
+          // PLAYER is only ready when connection to host is open
+          setIsConnected(true);
         });
 
         conn.on('data', (data: any) => {
@@ -58,10 +64,12 @@ export const useComms = (
         conn.on('close', () => {
             console.log("Connection to host closed");
             hostConnRef.current = null;
+            setIsConnected(false);
         });
 
         conn.on('error', (err) => {
             console.error("Connection error:", err);
+            setIsConnected(false);
         });
       }
     });
