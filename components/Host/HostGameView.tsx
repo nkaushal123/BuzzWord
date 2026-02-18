@@ -3,12 +3,21 @@ import QRCode from 'qrcode';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
   lobbyCode: string;
   onExit: () => void;
+}
+
+interface GameEvent {
+    id: string;
+    type: 'CORRECT' | 'WRONG';
+    playerId: string;
+    points: number;
+    timestamp: number;
+    questionValue: number;
 }
 
 const ScoreDisplay: React.FC<{ score: number; className?: string }> = ({ score, className }) => {
@@ -40,9 +49,22 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const [blockedPlayerIds, setBlockedPlayerIds] = useState<string[]>([]);
   const [blockedTeamIds, setBlockedTeamIds] = useState<string[]>([]);
   
-  // QR Code
+  // Undo / Stats State
+  const [gameEvents, setGameEvents] = useState<GameEvent[]>([]);
+  const [lastAction, setLastAction] = useState<{
+      type: 'CORRECT' | 'WRONG';
+      playerId: string;
+      points: number;
+      questionId: string;
+      playerName: string;
+      eventId: string;
+  } | null>(null);
+  const lastActionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // UI State
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [isQrExpanded, setIsQrExpanded] = useState(false);
+  const [showDetailedStats, setShowDetailedStats] = useState(false); // Toggle for Game Over screen
 
   // Generate QR Code on mount
   useEffect(() => {
@@ -172,6 +194,22 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     soundService.play('BOARD_FILL');
   };
 
+  const handleEndGame = () => {
+      if (window.confirm("Are you sure you want to end the game?")) {
+          setPhase(GamePhase.GAME_OVER);
+          
+          // Calculate winners
+          const participants = isTeamsMode ? teams : players;
+          const maxScore = Math.max(...participants.map(p => p.score));
+          const winners = participants.filter(p => p.score === maxScore).map(p => p.id);
+          
+          sendMessage({
+              type: 'GAME_OVER_SUMMARY',
+              payload: { winners }
+          });
+      }
+  };
+
   const handleQuestionSelect = (catId: string, q: Question) => {
     if (answeredQuestions.includes(q.id)) return;
     setCurrentQuestion({ catId, q });
@@ -194,12 +232,58 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     setTimer(10);
   };
 
+  const setUndoAction = (action: typeof lastAction) => {
+      if (lastActionTimeoutRef.current) clearTimeout(lastActionTimeoutRef.current);
+      setLastAction(action);
+      lastActionTimeoutRef.current = setTimeout(() => {
+          setLastAction(null);
+      }, 8000);
+  };
+
+  const handleUndo = () => {
+      if (!lastAction) return;
+      const { type, playerId, points, questionId, eventId } = lastAction;
+
+      // Revert Score
+      if (isTeamsMode) {
+          const team = teams.find(t => t.members.includes(playerId));
+          if (team) {
+              setTeams(prev => prev.map(t => t.id === team.id ? { ...t, score: type === 'CORRECT' ? t.score - points : t.score + points } : t));
+              if (type === 'WRONG') {
+                   setBlockedTeamIds(prev => prev.filter(id => id !== team.id));
+              }
+          }
+      } else {
+          setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, score: type === 'CORRECT' ? p.score - points : p.score + points } : p));
+          if (type === 'WRONG') {
+              setBlockedPlayerIds(prev => prev.filter(id => id !== playerId));
+          }
+      }
+
+      // Revert Question State if it was marked correct
+      if (type === 'CORRECT') {
+          setAnsweredQuestions(prev => prev.filter(id => id !== questionId));
+      }
+
+      // Remove the event from history
+      setGameEvents(prev => prev.filter(e => e.id !== eventId));
+
+      // Cleanup
+      if (lastActionTimeoutRef.current) clearTimeout(lastActionTimeoutRef.current);
+      setLastAction(null);
+  };
+
   const handleCorrect = () => {
     if (!currentQuestion || !buzzedPlayerId) return;
 
     soundService.play('CORRECT');
     const points = currentQuestion.q.points;
     const catTitle = board.categories.find(c => c.id === currentQuestion.catId)?.title || "Unknown";
+    
+    // Store name for Undo Toast
+    const playerName = isTeamsMode 
+        ? teams.find(t => t.members.includes(buzzedPlayerId))?.name || 'Team' 
+        : players.find(p => p.id === buzzedPlayerId)?.name || 'Player';
 
     if (isTeamsMode) {
         const team = teams.find(t => t.members.includes(buzzedPlayerId));
@@ -221,6 +305,26 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         } 
     });
 
+    const eventId = Math.random().toString(36).substr(2, 9);
+    const newEvent: GameEvent = {
+        id: eventId,
+        playerId: buzzedPlayerId,
+        type: 'CORRECT',
+        points,
+        timestamp: Date.now(),
+        questionValue: points
+    };
+    setGameEvents(prev => [...prev, newEvent]);
+    
+    setUndoAction({
+        type: 'CORRECT',
+        playerId: buzzedPlayerId,
+        points,
+        questionId: currentQuestion.q.id,
+        playerName,
+        eventId
+    });
+
     setAnsweredQuestions(prev => [...prev, currentQuestion.q.id]);
     setPhase(GamePhase.BOARD);
     setCurrentQuestion(null);
@@ -234,6 +338,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     soundService.play('WRONG');
     const points = currentQuestion.q.points;
     const catTitle = board.categories.find(c => c.id === currentQuestion.catId)?.title || "Unknown";
+
+    const playerName = isTeamsMode 
+        ? teams.find(t => t.members.includes(buzzedPlayerId))?.name || 'Team' 
+        : players.find(p => p.id === buzzedPlayerId)?.name || 'Player';
 
     if (isTeamsMode) {
         const team = teams.find(t => t.members.includes(buzzedPlayerId));
@@ -255,6 +363,26 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
             categoryTitle: catTitle,
             isDailyDouble: !!currentQuestion.q.isDailyDouble
         } 
+    });
+
+    const eventId = Math.random().toString(36).substr(2, 9);
+    const newEvent: GameEvent = {
+        id: eventId,
+        playerId: buzzedPlayerId,
+        type: 'WRONG',
+        points,
+        timestamp: Date.now(),
+        questionValue: points
+    };
+    setGameEvents(prev => [...prev, newEvent]);
+
+    setUndoAction({
+        type: 'WRONG',
+        playerId: buzzedPlayerId,
+        points,
+        questionId: currentQuestion.q.id,
+        playerName,
+        eventId
     });
 
     setBuzzedPlayerId(null);
@@ -302,10 +430,243 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       );
   };
 
+  // --- SUB-COMPONENTS FOR STATS ---
+
+  const StatsView = () => {
+      const participants = isTeamsMode ? teams : players;
+      
+      // Compute Awards
+      let mostCorrect = { id: '', count: -1 };
+      let mostWrong = { id: '', count: -1 };
+      let highestGain = { id: '', amount: -1 };
+      let riskTaker = { id: '', count: -1 }; // Same as most wrong but branded differently
+
+      const statsMap = new Map<string, { correct: number, wrong: number, maxPoints: number }>();
+      
+      participants.forEach(p => {
+          statsMap.set(p.id, { correct: 0, wrong: 0, maxPoints: 0 });
+      });
+
+      gameEvents.forEach(e => {
+          // Resolve player ID to Team ID if needed
+          let entityId = e.playerId;
+          if (isTeamsMode) {
+              const team = teams.find(t => t.members.includes(e.playerId));
+              if (team) entityId = team.id;
+          }
+
+          const stat = statsMap.get(entityId);
+          if (stat) {
+              if (e.type === 'CORRECT') {
+                  stat.correct++;
+                  if (e.points > stat.maxPoints) stat.maxPoints = e.points;
+                  if (e.points > highestGain.amount) highestGain = { id: entityId, amount: e.points };
+              } else {
+                  stat.wrong++;
+              }
+          }
+      });
+
+      statsMap.forEach((val, key) => {
+          if (val.correct > mostCorrect.count) mostCorrect = { id: key, count: val.correct };
+          if (val.wrong > mostWrong.count) mostWrong = { id: key, count: val.wrong };
+      });
+
+      const getName = (id: string) => participants.find(p => p.id === id)?.name || 'None';
+
+      // Chart Generation (Score over Events)
+      // X Axis: 0 to gameEvents.length
+      // Y Axis: Score
+      const chartHeight = 200;
+      const chartWidth = 600;
+      const maxScore = Math.max(...participants.map(p => p.score), 1000);
+      const minScore = Math.min(...participants.map(p => p.score), 0);
+      const scoreRange = maxScore - minScore || 1;
+      
+      const getY = (score: number) => chartHeight - ((score - minScore) / scoreRange) * chartHeight;
+      const getX = (index: number) => (index / (gameEvents.length || 1)) * chartWidth;
+
+      // Build lines
+      const lines = participants.map((p, i) => {
+          let currentScore = 0;
+          let path = `M 0 ${getY(0)}`;
+          const color = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#ec4899'][i % 6];
+          
+          gameEvents.forEach((e, idx) => {
+              let isThisEntity = e.playerId === p.id;
+              if (isTeamsMode) {
+                  const team = teams.find(t => t.id === p.id); // p is Team here
+                  if (team && team.members.includes(e.playerId)) isThisEntity = true;
+              }
+
+              if (isThisEntity) {
+                  if (e.type === 'CORRECT') currentScore += e.points;
+                  else currentScore -= e.points;
+              }
+              path += ` L ${getX(idx + 1)} ${getY(currentScore)}`;
+          });
+
+          return { path, color, name: p.name, finalScore: currentScore };
+      });
+
+      return (
+          <div className="flex flex-col h-full overflow-y-auto p-8 animate-in slide-in-from-bottom-10 fade-in duration-500">
+              <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-4xl font-display text-jeopardy-gold">Game Statistics</h2>
+                  <button onClick={() => setShowDetailedStats(false)} className="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg">Back to Summary</button>
+              </div>
+
+              {/* Awards Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                  <div className="bg-gray-800 p-6 rounded-xl border border-blue-500/30 flex items-center gap-4">
+                      <div className="p-4 bg-blue-900/50 rounded-full text-blue-400">
+                          <Brain size={32} />
+                      </div>
+                      <div>
+                          <p className="text-sm text-gray-400 uppercase font-bold">Big Brain</p>
+                          <p className="text-xl font-bold text-white">{getName(mostCorrect.id)}</p>
+                          <p className="text-xs text-blue-300">{mostCorrect.count > -1 ? mostCorrect.count : 0} Correct Answers</p>
+                      </div>
+                  </div>
+
+                  <div className="bg-gray-800 p-6 rounded-xl border border-red-500/30 flex items-center gap-4">
+                      <div className="p-4 bg-red-900/50 rounded-full text-red-400">
+                          <AlertTriangle size={32} />
+                      </div>
+                      <div>
+                          <p className="text-sm text-gray-400 uppercase font-bold">Risk Taker</p>
+                          <p className="text-xl font-bold text-white">{getName(mostWrong.id)}</p>
+                          <p className="text-xs text-red-300">{mostWrong.count > -1 ? mostWrong.count : 0} Wrong Answers</p>
+                      </div>
+                  </div>
+
+                  <div className="bg-gray-800 p-6 rounded-xl border border-yellow-500/30 flex items-center gap-4">
+                      <div className="p-4 bg-yellow-900/50 rounded-full text-jeopardy-gold">
+                          <Zap size={32} />
+                      </div>
+                      <div>
+                          <p className="text-sm text-gray-400 uppercase font-bold">High Roller</p>
+                          <p className="text-xl font-bold text-white">{getName(highestGain.id)}</p>
+                          <p className="text-xs text-yellow-300">won ${highestGain.amount > -1 ? highestGain.amount : 0} in one go</p>
+                      </div>
+                  </div>
+              </div>
+
+              {/* Chart */}
+              <div className="bg-gray-800/50 p-8 rounded-2xl mb-8 border border-gray-700">
+                  <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-gray-300"><TrendingUp /> Score History</h3>
+                  <div className="relative w-full h-[250px] bg-gray-900/50 rounded border border-gray-800">
+                      <svg width="100%" height="100%" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" className="overflow-visible">
+                          {/* Grid Lines */}
+                          <line x1="0" y1={getY(0)} x2={chartWidth} y2={getY(0)} stroke="#4b5563" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
+                          
+                          {lines.map((l, i) => (
+                              <path key={i} d={l.path} stroke={l.color} strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" className="drop-shadow-lg" />
+                          ))}
+                      </svg>
+                  </div>
+                  <div className="flex flex-wrap gap-4 mt-6 justify-center">
+                      {lines.map((l, i) => (
+                          <div key={i} className="flex items-center gap-2 text-sm bg-gray-900 px-3 py-1 rounded-full border border-gray-700">
+                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: l.color }}></div>
+                              <span className="font-bold text-gray-300">{l.name}</span>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          </div>
+      );
+  };
+
   // --- LAYOUT ---
 
+  // GAME OVER PHASE
+  if (phase === GamePhase.GAME_OVER) {
+      if (showDetailedStats) {
+          return (
+             <div className="flex h-screen bg-gray-900 text-white overflow-hidden font-sans">
+                 <div className="flex-1 relative bg-gray-900 flex flex-col">
+                     <StatsView />
+                 </div>
+             </div>
+          );
+      }
+
+      const participants = isTeamsMode ? teams : players;
+      const sorted = [...participants].sort((a, b) => b.score - a.score);
+      const winner = sorted[0];
+
+      return (
+        <div className="flex h-screen bg-gray-900 text-white overflow-hidden font-sans flex-col items-center justify-center relative">
+            {/* Background Effects */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-600/20 rounded-full blur-[100px] animate-pulse"></div>
+            </div>
+
+            <div className="z-10 text-center max-w-4xl w-full p-6">
+                <div className="mb-8 animate-bounce">
+                    <Trophy size={80} className="text-jeopardy-gold mx-auto drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]" />
+                </div>
+                
+                <h1 className="text-6xl md:text-8xl font-display text-white mb-2 drop-shadow-xl uppercase tracking-wider">
+                    {winner ? winner.name : 'No Winner'}
+                </h1>
+                <p className="text-2xl text-jeopardy-gold font-mono font-bold mb-12 tracking-widest">
+                    WINS WITH ${winner ? winner.score : 0}
+                </p>
+
+                {/* Scoreboard */}
+                <div className="bg-gray-800/80 backdrop-blur-sm border border-gray-700 rounded-2xl p-6 mb-12 max-h-[300px] overflow-y-auto custom-scrollbar shadow-2xl">
+                    <table className="w-full text-left">
+                        <thead>
+                            <tr className="border-b border-gray-700 text-gray-400 uppercase text-xs">
+                                <th className="pb-2 pl-4">Rank</th>
+                                <th className="pb-2">Name</th>
+                                <th className="pb-2 pr-4 text-right">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sorted.map((p, i) => (
+                                <tr key={p.id} className="border-b border-gray-700/50 last:border-0 hover:bg-white/5">
+                                    <td className="py-3 pl-4 font-mono text-gray-500">#{i + 1}</td>
+                                    <td className="py-3 font-bold text-lg flex items-center gap-2">
+                                        {i === 0 && <Medal size={16} className="text-jeopardy-gold" />}
+                                        {i === 1 && <Medal size={16} className="text-gray-400" />}
+                                        {i === 2 && <Medal size={16} className="text-amber-700" />}
+                                        {p.name}
+                                    </td>
+                                    <td className={`py-3 pr-4 text-right font-mono font-bold ${p.score >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        ${p.score}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div className="flex justify-center gap-6">
+                    <button 
+                        onClick={() => setShowDetailedStats(true)}
+                        className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform hover:scale-105"
+                    >
+                        <BarChart2 /> View Game Stats
+                    </button>
+                    <button 
+                        onClick={onExit}
+                        className="px-8 py-4 bg-gray-700 hover:bg-red-600 text-white rounded-xl font-bold shadow-lg flex items-center gap-2 transition-colors"
+                    >
+                        <LogOut /> Exit to Lobby
+                    </button>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
+  // STANDARD GAME LAYOUT
+
   return (
-    <div className="flex h-screen bg-gray-900 text-white overflow-hidden font-sans">
+    <div className="flex h-screen bg-gray-900 text-white overflow-hidden font-sans relative">
       
       {/* LEFT SIDEBAR: PARTICIPANTS & STATS */}
       <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col shadow-2xl z-20">
@@ -319,7 +680,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
               <div className="text-5xl font-mono font-bold text-white tracking-widest mb-4">
                   {lobbyCode}
               </div>
-              <button onClick={onExit} className="flex items-center gap-2 text-gray-400 hover:text-red-400 text-sm transition-colors">
+              <button onClick={handleEndGame} className="flex items-center gap-2 text-gray-400 hover:text-red-400 text-sm transition-colors">
                   <LogOut size={14} /> End Game
               </button>
           </div>
@@ -555,6 +916,25 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                            </div>
                        </div>
                    </div>
+              </div>
+          )}
+
+          {/* Undo Toast */}
+          {lastAction && (
+              <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-40 animate-in fade-in slide-in-from-bottom-4">
+                  <button 
+                    onClick={handleUndo}
+                    className="bg-gray-800 hover:bg-gray-700 text-white px-6 py-3 rounded-full shadow-2xl border border-gray-600 flex items-center gap-3 transition-all hover:scale-105 group"
+                  >
+                      <RotateCcw className="text-gray-400 group-hover:text-white transition-colors" size={20} />
+                      <div className="flex flex-col items-start text-left">
+                          <span className="text-xs text-gray-400 font-bold uppercase">Undo Action</span>
+                          <span className="text-sm">
+                              {lastAction.type === 'CORRECT' ? 'Marked Correct: ' : 'Marked Wrong: '} 
+                              <span className="font-bold text-jeopardy-gold">{lastAction.playerName}</span>
+                          </span>
+                      </div>
+                  </button>
               </div>
           )}
 
