@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
-import { GoogleGenAI, LiveServerMessage, FunctionDeclaration, Blob, Modality } from "@google/genai";
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
@@ -28,30 +27,6 @@ const ScoreDisplay: React.FC<{ score: number; className?: string }> = ({ score, 
         </span>
     );
 };
-
-// --- AUDIO HELPERS FOR GEMINI LIVE ---
-function encode(bytes: Uint8Array) {
-  let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-function createBlob(data: Float32Array): Blob {
-  const l = data.length;
-  const int16 = new Int16Array(l);
-  for (let i = 0; i < l; i++) {
-    // Clamp values to [-1, 1] range to prevent overflow artifacts
-    const s = Math.max(-1, Math.min(1, data[i]));
-    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-  }
-  return {
-    data: encode(new Uint8Array(int16.buffer)),
-    mimeType: 'audio/pcm;rate=16000',
-  };
-}
 
 // --- HELPER FOR YOUTUBE ---
 const getYoutubeId = (url: string | undefined) => {
@@ -102,13 +77,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   // --- AUDIO STATE ---
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
-  // --- AI LISTENING STATE ---
-  const [isAiListening, setIsAiListening] = useState(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const sessionPromiseRef = useRef<Promise<any> | null>(null); // To store session promise for cleanup
+  // --- SPEECH RECOGNITION STATE ---
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   // Generate QR Code on mount
   useEffect(() => {
@@ -123,10 +94,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     }).then(setQrCodeDataUrl);
   }, [lobbyCode]);
 
-  // Clean up AI on unmount or when question changes
+  // Clean up on unmount or when question changes
   useEffect(() => {
       return () => {
-          stopAiListening();
+          stopListening();
       }
   }, []);
 
@@ -162,8 +133,8 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     // 2. We have a question loaded
     // 3. Buzzers are still locked (meaning we haven't opened them yet)
     // 4. We aren't already listening
-    if (phase === GamePhase.QUESTION && currentQuestion && buzzLocked && !isAiListening) {
-        startAiListening();
+    if (phase === GamePhase.QUESTION && currentQuestion && buzzLocked && !isListening) {
+        startListening();
     }
   }, [phase, currentQuestion, buzzLocked]);
 
@@ -190,7 +161,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
             setBuzzedPlayerId(msg.payload.playerId);
             setBuzzLocked(true);
             soundService.play('BUZZ');
-            stopAiListening(); // Stop AI if someone buzzes (just in case)
+            stopListening(); // Stop listening if someone buzzes
             setIsPlayingAudio(false); // Stop YouTube audio on buzz
             
             // TIMER: Switch to 5 second answer timer
@@ -262,7 +233,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const handleEndGame = () => {
       if (window.confirm("Are you sure you want to end the game?")) {
           setPhase(GamePhase.GAME_OVER);
-          stopAiListening();
+          stopListening();
           setIsPlayingAudio(false);
           
           // Calculate winners
@@ -281,7 +252,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     if (answeredQuestions.includes(q.id)) return;
     
     // Stop any previous instance first to ensure clean state
-    stopAiListening();
+    stopListening();
     setIsPlayingAudio(false);
     
     setCurrentQuestion({ catId, q });
@@ -299,127 +270,70 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     // Auto-start is handled by useEffect
   };
 
-  // --- AI LISTENING FUNCTIONS ---
+  // --- SPEECH RECOGNITION FUNCTIONS ---
 
-  const stopAiListening = () => {
-      setIsAiListening(false);
-      
-      // Cleanup Audio
-      if (processorRef.current) {
-          processorRef.current.disconnect();
-          processorRef.current = null;
+  const stopListening = () => {
+      if (recognitionRef.current) {
+          recognitionRef.current.stop();
+          recognitionRef.current = null;
       }
-      if (sourceRef.current) {
-          sourceRef.current.disconnect();
-          sourceRef.current = null;
-      }
-      if (streamRef.current) {
-          streamRef.current.getTracks().forEach(t => t.stop());
-          streamRef.current = null;
-      }
-      if (audioContextRef.current) {
-          audioContextRef.current.close();
-          audioContextRef.current = null;
-      }
-      
-      // Close session if it exists
-      if (sessionPromiseRef.current) {
-          sessionPromiseRef.current
-            .then(session => session.close())
-            .catch(err => console.debug("Session close error", err));
-          sessionPromiseRef.current = null;
-      }
+      setIsListening(false);
   };
 
-  const startAiListening = async () => {
-    if (!currentQuestion) return;
-    
-    // Stop any existing session first
-    stopAiListening();
-    setIsAiListening(true);
-    
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-            sampleRate: 16000,
-            channelCount: 1,
-            echoCancellation: true
-        }});
-        streamRef.current = stream;
-        
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-        audioContextRef.current = audioContext;
-        
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        
-        const unlockTool: FunctionDeclaration = {
-            name: 'unlockBuzzers',
-            description: 'Unlocks the game buzzers to allow players to answer.',
-        };
+  const startListening = () => {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-        const sessionPromise = ai.live.connect({
-            model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-            config: {
-                responseModalities: [Modality.AUDIO],
-                tools: [{ functionDeclarations: [unlockTool] }],
-                // Simplified, urgent prompt for lower latency
-                systemInstruction: `You are a Jeopardy host assistant. The host is reading this question: "${currentQuestion.q.question}". Listen to the audio. When the host finishes reading the text, immediately call the "unlockBuzzers" function. Do not wait for an answer.`,
-            },
-            callbacks: {
-                onopen: () => {
-                    if (!audioContextRef.current || !streamRef.current) return;
-                    
-                    const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
-                    sourceRef.current = source;
-                    
-                    // Reduced buffer size (4096 -> 2048) for lower latency (~128ms at 16kHz)
-                    const processor = audioContextRef.current.createScriptProcessor(2048, 1, 1);
-                    processorRef.current = processor;
-                    
-                    processor.onaudioprocess = (e) => {
-                        const inputData = e.inputBuffer.getChannelData(0);
-                        const pcmBlob = createBlob(inputData);
-                        sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
-                    };
-                    
-                    source.connect(processor);
-                    processor.connect(audioContextRef.current.destination);
-                },
-                onmessage: (msg: LiveServerMessage) => {
-                    if (msg.toolCall) {
-                        for (const fc of msg.toolCall.functionCalls) {
-                            if (fc.name === 'unlockBuzzers') {
-                                handleUnlockBuzzers();
-                                stopAiListening(); // Auto-stop after triggering
-                            }
-                        }
-                    }
-                },
-                onclose: () => { 
-                    setIsAiListening(false); 
-                },
-                onerror: (err) => { 
-                    console.error("Gemini Live Error:", err); 
-                    stopAiListening(); 
-                }
-            }
-        });
-        
-        sessionPromiseRef.current = sessionPromise;
-        
-    } catch (e) {
-        console.error("AI Init failed", e);
-        setIsAiListening(false);
-        // Don't alert on auto-start failure to avoid spamming user if permission denied
-        console.warn("Could not start AI listening. Please check microphone permissions.");
-    }
+      if (!SpeechRecognition) {
+          console.warn("Speech recognition not supported in this browser.");
+          return;
+      }
+
+      // If already listening, don't double start
+      if (recognitionRef.current) return;
+
+      try {
+          const recognition = new SpeechRecognition();
+          recognition.lang = 'en-US';
+          recognition.continuous = false; // We want to detect the *end* of a phrase
+          recognition.interimResults = false;
+
+          recognition.onstart = () => {
+              setIsListening(true);
+          };
+
+          // This fires when the user stops talking
+          recognition.onspeechend = () => {
+              // The browser detected speech ended. Unlock buzzers.
+              handleUnlockBuzzers();
+              stopListening();
+          };
+
+          recognition.onerror = (event: any) => {
+              // 'no-speech' happens if they don't say anything for a while. 
+              // We just stop listening to avoid error loops.
+              console.log("Speech recognition error", event.error);
+              stopListening();
+          };
+
+          recognition.onend = () => {
+              setIsListening(false);
+              recognitionRef.current = null;
+          };
+
+          recognition.start();
+          recognitionRef.current = recognition;
+      } catch (err) {
+          console.error("Failed to start speech recognition", err);
+          setIsListening(false);
+      }
   };
 
   const handleUnlockBuzzers = () => {
     setBuzzLocked(false);
     setTimerMode('BUZZ');
     setTimer(10);
-    // Ensure AI is off if manually triggered
-    stopAiListening();
+    // Ensure mic is off
+    stopListening();
   };
 
   const setUndoAction = (action: typeof lastAction) => {
@@ -465,7 +379,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const handleCorrect = () => {
     if (!currentQuestion || !buzzedPlayerId) return;
-    stopAiListening();
+    stopListening();
     setIsPlayingAudio(false);
 
     soundService.play('CORRECT');
@@ -526,7 +440,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const handleWrong = () => {
     if (!currentQuestion || !buzzedPlayerId) return;
-    stopAiListening();
+    stopListening();
     setIsPlayingAudio(false);
 
     soundService.play('WRONG');
@@ -587,7 +501,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const handleSkip = () => {
     if (!currentQuestion) return;
-    stopAiListening();
+    stopListening();
     setIsPlayingAudio(false);
     setAnsweredQuestions(prev => [...prev, currentQuestion.q.id]);
     setPhase(GamePhase.BOARD);
@@ -635,8 +549,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       let mostCorrect = { id: '', count: -1 };
       let mostWrong = { id: '', count: -1 };
       let highestGain = { id: '', amount: -1 };
-      let riskTaker = { id: '', count: -1 }; // Same as most wrong but branded differently
-
+      
       const statsMap = new Map<string, { correct: number, wrong: number, maxPoints: number }>();
       
       participants.forEach(p => {
@@ -671,12 +584,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       const getName = (id: string) => participants.find(p => p.id === id)?.name || 'None';
 
       // Chart Generation (Score over Events)
-      // X Axis: 0 to gameEvents.length
-      // Y Axis: Score
       const chartHeight = 200;
       const chartWidth = 600;
-      const maxScore = Math.max(...participants.map(p => p.score), 1000);
       const minScore = Math.min(...participants.map(p => p.score), 0);
+      const maxScore = Math.max(...participants.map(p => p.score), 1000);
       const scoreRange = maxScore - minScore || 1;
       
       const getY = (score: number) => chartHeight - ((score - minScore) / scoreRange) * chartHeight;
@@ -1043,10 +954,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                {currentQuestion.q.question}
                            </h2>
 
-                            {/* AI Listening Indicator */}
-                            {isAiListening && (
+                            {/* Mic Listening Indicator */}
+                            {isListening && (
                                 <div className="absolute top-4 right-4 flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse shadow-lg">
-                                    <Mic size={14} /> Listening for end of question...
+                                    <Mic size={14} /> Listening to host...
                                 </div>
                             )}
 
@@ -1105,7 +1016,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                </button>
                            </div>
 
-                           {/* Center: Open Buzzers & AI Mic */}
+                           {/* Center: Open Buzzers & Mic */}
                            <div className="col-span-1 flex gap-2">
                                 <button 
                                     onClick={handleUnlockBuzzers} 
@@ -1116,14 +1027,14 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                 </button>
                                 
                                 <div className="flex flex-col gap-1">
-                                    {/* Magic Mic Button - now acts as a Toggle/Stop */}
+                                    {/* Mic Button - Toggles Web Speech API */}
                                     <button
-                                        onClick={isAiListening ? stopAiListening : startAiListening}
+                                        onClick={isListening ? stopListening : startListening}
                                         disabled={!buzzLocked || !!buzzedPlayerId}
-                                        className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${isAiListening ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 hover:bg-gray-700 text-jeopardy-gold disabled:opacity-30'}`}
-                                        title={isAiListening ? "Stop Auto-Listening" : "Start Auto-Listening (Manual)"}
+                                        className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${isListening ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 hover:bg-gray-700 text-jeopardy-gold disabled:opacity-30'}`}
+                                        title={isListening ? "Stop Auto-Detection" : "Start Auto-Detection (Mic)"}
                                     >
-                                        {isAiListening ? <MicOff size={24} /> : <Sparkles size={24} />}
+                                        {isListening ? <MicOff size={24} /> : <Sparkles size={24} />}
                                     </button>
                                 </div>
 
@@ -1145,7 +1056,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                    onClick={handleCorrect}
                                    disabled={!buzzedPlayerId}
                                    className="flex-1 bg-green-600 hover:bg-green-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 transition-colors"
-                               >
+                                >
                                    <Check size={24} /> Correct
                                </button>
                                <button 
