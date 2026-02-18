@@ -1,23 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Users, Lock, Unlock, Check, X, ArrowRight, Copy, LogOut, Wifi, WifiOff, Star, DollarSign, Link, Shield, Trash2, Eye, Trophy, Target, Zap, TrendingDown, Clock } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
   lobbyCode: string;
   onExit: () => void;
-}
-
-// Stats tracking for the current session
-interface SessionStats {
-    buzzes: number;
-    correct: number;
-    wrong: number;
-    dailyDoubles: number;
-    accuracy: number;
 }
 
 const ScoreDisplay: React.FC<{ score: number; className?: string }> = ({ score, className }) => {
@@ -73,8 +64,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
           }, 1000);
       } else if (timer === 0) {
           soundService.play('TIME_UP');
-          // We DO NOT auto-lock. We just play the sound and let the host decide.
-          // But we stop the timer to avoid spamming.
           setTimer(null); 
       }
       return () => {
@@ -84,7 +73,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   // Sync Timer updates lightly
   useEffect(() => {
-      // Send a lightweight sync when timer changes to keep clients roughly in sync
       if (timer !== null) {
           sendMessage({
               type: 'TIME_SYNC',
@@ -104,11 +92,8 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     
     if (msg.type === 'BUZZ') {
       if (!buzzLocked && !buzzedPlayerId) {
-        
-        // Check if player is blocked
+        // Check blocks
         const isPlayerBlocked = blockedPlayerIds.includes(msg.payload.playerId);
-        
-        // Check if team is blocked
         let isTeamBlocked = false;
         if (isTeamsMode) {
             const team = teams.find(t => t.members.includes(msg.payload.playerId));
@@ -136,11 +121,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
     if (msg.type === 'JOIN_TEAM') {
         setTeams(prev => prev.map(team => {
-            // Remove from old team if exists (though UI prevents this usually)
             if (team.members.includes(msg.payload.playerId)) {
                 return { ...team, members: team.members.filter(id => id !== msg.payload.playerId) };
             }
-            // Add to new team
             if (team.id === msg.payload.teamId) {
                 return { ...team, members: [...team.members, msg.payload.playerId] };
             }
@@ -149,7 +132,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     }
   });
 
-  // Sync State to Players whenever it changes significantly
+  // Sync State
   useEffect(() => {
     const gameState: GameState = {
       lobbyCode,
@@ -180,10 +163,8 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       isTeamsMode, 
       teams, 
       blockedPlayerIds, 
-      blockedTeamIds,
-      // Timer is synced separately via TIME_SYNC to avoid spamming the full state
+      blockedTeamIds
   ]);
-
 
   const startGame = () => {
     setPhase(GamePhase.BOARD);
@@ -195,10 +176,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     setCurrentQuestion({ catId, q });
     setPhase(GamePhase.QUESTION);
     setBuzzedPlayerId(null);
-    setBuzzLocked(true); // Locked until host opens it
-    setBlockedPlayerIds([]); // Reset blocks for new question
+    setBuzzLocked(true); 
+    setBlockedPlayerIds([]); 
     setBlockedTeamIds([]);
-    setTimer(null); // Reset timer
+    setTimer(null); 
     setTimerMode(null);
     
     if (q.isDailyDouble) {
@@ -208,7 +189,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const handleUnlockBuzzers = () => {
     setBuzzLocked(false);
-    // TIMER: Start 10 second countdown for someone to buzz
     setTimerMode('BUZZ');
     setTimer(10);
   };
@@ -221,17 +201,14 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     const catTitle = board.categories.find(c => c.id === currentQuestion.catId)?.title || "Unknown";
 
     if (isTeamsMode) {
-        // Find team
         const team = teams.find(t => t.members.includes(buzzedPlayerId));
         if (team) {
             setTeams(prev => prev.map(t => t.id === team.id ? { ...t, score: t.score + points } : t));
         }
     } else {
-        // Solo
         setPlayers(prev => prev.map(p => p.id === buzzedPlayerId ? { ...p, score: p.score + points } : p));
     }
 
-    // Send Result Event to Players (for stats)
     sendMessage({ 
         type: 'RESULT_EVENT', 
         payload: { 
@@ -243,7 +220,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         } 
     });
 
-    // Close Question
     setAnsweredQuestions(prev => [...prev, currentQuestion.q.id]);
     setPhase(GamePhase.BOARD);
     setCurrentQuestion(null);
@@ -262,12 +238,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         const team = teams.find(t => t.members.includes(buzzedPlayerId));
         if (team) {
              setTeams(prev => prev.map(t => t.id === team.id ? { ...t, score: t.score - points } : t));
-             // Block team
              setBlockedTeamIds(prev => [...prev, team.id]);
         }
     } else {
         setPlayers(prev => prev.map(p => p.id === buzzedPlayerId ? { ...p, score: p.score - points } : p));
-        // Block player
         setBlockedPlayerIds(prev => [...prev, buzzedPlayerId]);
     }
 
@@ -282,11 +256,8 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         } 
     });
 
-    // Re-open buzzers for others
     setBuzzedPlayerId(null);
     setBuzzLocked(false);
-    
-    // TIMER: Restart 10s buzz timer for others
     setTimerMode('BUZZ');
     setTimer(10);
   };
@@ -298,35 +269,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     setCurrentQuestion(null);
     setBuzzedPlayerId(null);
     setTimer(null);
-  };
-
-  const handleEndGame = () => {
-      if (window.confirm("End the game and show final results?")) {
-          setPhase(GamePhase.GAME_OVER);
-          
-          // Calculate Winners
-          let highestScore = -Infinity;
-          let winners: string[] = [];
-
-          if (isTeamsMode) {
-              teams.forEach(t => {
-                  if (t.score > highestScore) highestScore = t.score;
-              });
-              // Get all members of winning teams
-              teams.filter(t => t.score === highestScore).forEach(t => {
-                  winners.push(...t.members);
-              });
-          } else {
-              players.forEach(p => {
-                  if (p.score > highestScore) highestScore = p.score;
-              });
-              players.filter(p => p.score === highestScore).forEach(p => {
-                  winners.push(p.id);
-              });
-          }
-
-          sendMessage({ type: 'GAME_OVER_SUMMARY', payload: { winners } });
-      }
   };
 
   const getBuzzedName = () => {
@@ -341,15 +283,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       return team ? team.name : '';
   };
 
-  // --- RENDER HELPERS ---
-
-  // Timer Bar Component
   const TimerBar = () => {
       if (timer === null) return null;
-      
       const maxTime = timerMode === 'BUZZ' ? 10 : 5;
       const percentage = (timer / maxTime) * 100;
-      
       let colorClass = 'bg-green-500';
       if (percentage <= 40) colorClass = 'bg-yellow-500';
       if (percentage <= 20) colorClass = 'bg-red-600 animate-pulse';
@@ -364,160 +301,135 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       );
   };
 
-  if (phase === GamePhase.LOBBY) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 to-black text-white flex flex-col p-8">
-        <div className="flex justify-between items-start mb-12">
-           <div>
-               <h1 className="text-6xl font-display text-jeopardy-gold mb-2">{board.title}</h1>
-               <div className="flex items-center gap-4">
-                    <div className="bg-gray-800 px-6 py-3 rounded-xl border border-blue-500 flex items-center gap-4">
-                        <span className="text-gray-400 uppercase text-sm font-bold tracking-wider">Lobby Code</span>
-                        <span className="text-5xl font-mono font-bold tracking-widest text-white">{lobbyCode}</span>
-                    </div>
-                    
-                    {/* QR CODE SECTION */}
-                    {qrCodeDataUrl && (
-                        <div className="bg-white p-2 rounded-xl">
-                            <img src={qrCodeDataUrl} alt="Join Game QR" className="w-24 h-24" />
-                        </div>
-                    )}
-               </div>
-               <p className="mt-4 text-blue-300 flex items-center gap-2">
-                   <ArrowRight size={16} /> Join at <span className="text-white font-mono">{window.location.host}</span>
-                   or scan the QR code
-               </p>
-           </div>
-           
-           <div className="flex gap-4">
-                <button 
-                    onClick={() => setIsTeamsMode(!isTeamsMode)}
-                    className={`px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-all ${isTeamsMode ? 'bg-jeopardy-gold text-blue-900' : 'bg-gray-800 text-gray-400'}`}
-                >
-                    <Shield size={20} />
-                    {isTeamsMode ? 'Teams Mode: ON' : 'Teams Mode: OFF'}
-                </button>
-                <button 
-                    onClick={startGame}
-                    className="bg-green-600 hover:bg-green-500 text-white px-8 py-3 rounded-lg font-bold shadow-lg text-xl flex items-center gap-2"
-                >
-                    <Play size={24} /> Start Game
-                </button>
-           </div>
-        </div>
-
-        <div className="flex-1 grid grid-cols-2 gap-8">
-            {/* Players List */}
-            <div className="bg-black/30 rounded-2xl p-6 border border-white/10 overflow-y-auto">
-                <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-                    <Users className="text-blue-400" /> 
-                    Players ({players.length})
-                </h2>
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                    {players.map(p => (
-                        <div key={p.id} className="bg-gray-800 p-3 rounded-lg flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center font-bold">
-                                {p.name.charAt(0).toUpperCase()}
-                            </div>
-                            <span className="truncate font-medium">{p.name}</span>
-                        </div>
-                    ))}
-                    {players.length === 0 && <p className="text-gray-500 italic">Waiting for players...</p>}
-                </div>
-            </div>
-            
-            {/* Teams Preview (If Active) */}
-            {isTeamsMode && (
-                 <div className="bg-black/30 rounded-2xl p-6 border border-white/10 overflow-y-auto">
-                    <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-                        <Shield className="text-jeopardy-gold" /> 
-                        Teams ({teams.length})
-                    </h2>
-                     <div className="space-y-3">
-                        {teams.map(t => (
-                             <div key={t.id} className="bg-blue-900/40 border border-blue-500/30 p-4 rounded-xl">
-                                 <div className="flex justify-between items-center mb-2">
-                                     <span className="font-bold text-lg">{t.name}</span>
-                                     <span className="text-xs bg-blue-800 px-2 py-1 rounded text-blue-200">{t.members.length} Members</span>
-                                 </div>
-                                 <div className="flex flex-wrap gap-1">
-                                     {t.members.map(mid => {
-                                         const p = players.find(pl => pl.id === mid);
-                                         return p ? (
-                                             <span key={mid} className="text-xs bg-black/40 px-2 py-1 rounded text-gray-300">{p.name}</span>
-                                         ) : null;
-                                     })}
-                                 </div>
-                             </div>
-                        ))}
-                         {teams.length === 0 && <p className="text-gray-500 italic">Players can create teams on their phones.</p>}
-                     </div>
-                 </div>
-            )}
-        </div>
-      </div>
-    );
-  }
-  
-  // RENDER BOARD / QUESTION / GAME OVER...
-  // (Reusing simplified structure for brevity where logic didn't change heavily, but focusing on Timer UI)
-
-  if (phase === GamePhase.GAME_OVER) {
-       return (
-           <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-8">
-               <h1 className="text-6xl font-display text-jeopardy-gold mb-8">FINAL STANDINGS</h1>
-               <div className="w-full max-w-4xl space-y-4">
-                   {(isTeamsMode ? teams : players)
-                    .sort((a, b) => b.score - a.score)
-                    .map((participant, index) => (
-                        <div key={participant.id} className={`flex items-center justify-between p-6 rounded-xl border ${index === 0 ? 'bg-jeopardy-gold text-black border-yellow-500 scale-105 shadow-2xl' : 'bg-gray-800 border-gray-700'}`}>
-                            <div className="flex items-center gap-4">
-                                <span className="font-mono text-2xl font-bold opacity-50">#{index + 1}</span>
-                                <span className="text-3xl font-bold">{participant.name}</span>
-                            </div>
-                            <span className="font-mono text-4xl font-bold">
-                                {participant.score < 0 ? '-' : ''}${Math.abs(participant.score)}
-                            </span>
-                        </div>
-                    ))}
-               </div>
-               <button onClick={onExit} className="mt-12 bg-gray-700 hover:bg-gray-600 text-white px-8 py-3 rounded-lg font-bold flex items-center gap-2">
-                   <LogOut /> Exit Game
-               </button>
-           </div>
-       )
-  }
+  // --- LAYOUT ---
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col">
-      {/* Top Bar */}
-      <div className="bg-gray-900 border-b border-gray-800 p-2 flex justify-between items-center px-4">
-          <div className="flex gap-4">
-              <button onClick={onExit} className="text-gray-400 hover:text-white"><LogOut size={20} /></button>
-              <div className="flex items-center gap-2 text-jeopardy-gold font-mono">
-                  <Wifi size={16} />
-                  <span>{lobbyCode}</span>
+    <div className="flex h-screen bg-gray-900 text-white overflow-hidden font-sans">
+      
+      {/* LEFT SIDEBAR: PARTICIPANTS & STATS */}
+      <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col shadow-2xl z-20">
+          
+          {/* Header */}
+          <div className="p-6 border-b border-gray-700 bg-gray-800">
+              <div className="flex items-center gap-3 text-jeopardy-gold mb-2">
+                  <Wifi className="animate-pulse" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Lobby Code</span>
               </div>
+              <div className="text-5xl font-mono font-bold text-white tracking-widest mb-4">
+                  {lobbyCode}
+              </div>
+              <button onClick={onExit} className="flex items-center gap-2 text-gray-400 hover:text-red-400 text-sm transition-colors">
+                  <LogOut size={14} /> End Game
+              </button>
           </div>
-          <div className="flex gap-4 overflow-x-auto max-w-[60vw] scrollbar-hide">
-              {(isTeamsMode ? teams : players).sort((a,b) => b.score - a.score).map(p => (
-                  <div key={p.id} className={`flex flex-col items-center px-3 py-1 rounded ${buzzedPlayerId && (isTeamsMode ? (p as Team).members.includes(buzzedPlayerId) : p.id === buzzedPlayerId) ? 'bg-white text-black' : 'bg-gray-800'}`}>
-                      <span className="text-xs font-bold truncate max-w-[80px]">{p.name}</span>
-                      <ScoreDisplay score={p.score} className="font-mono text-sm" />
+
+          {/* Players / Teams List */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="flex justify-between items-center mb-2 px-2">
+                  <h3 className="text-xs font-bold uppercase text-gray-500">
+                      {isTeamsMode ? 'Teams' : 'Players'} ({isTeamsMode ? teams.length : players.length})
+                  </h3>
+                  {phase === GamePhase.LOBBY && (
+                      <button 
+                        onClick={() => setIsTeamsMode(!isTeamsMode)}
+                        className="text-xs text-blue-400 hover:text-white"
+                      >
+                          {isTeamsMode ? 'Switch to Solo' : 'Switch to Teams'}
+                      </button>
+                  )}
+              </div>
+
+              {(isTeamsMode ? teams : players)
+                  .sort((a, b) => b.score - a.score)
+                  .map((p) => {
+                      const isBuzzed = buzzedPlayerId && (isTeamsMode ? (p as Team).members.includes(buzzedPlayerId) : p.id === buzzedPlayerId);
+                      const isBlocked = isTeamsMode 
+                          ? blockedTeamIds.includes(p.id) 
+                          : blockedPlayerIds.includes(p.id);
+
+                      return (
+                        <div 
+                            key={p.id} 
+                            className={`
+                                relative p-4 rounded-xl border-2 transition-all duration-300
+                                ${isBuzzed ? 'bg-jeopardy-gold border-white scale-105 shadow-xl text-black' : 'bg-gray-700/50 border-gray-600 text-white'}
+                                ${isBlocked ? 'opacity-50 grayscale' : ''}
+                            `}
+                        >
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <div className="font-bold text-lg leading-tight mb-1">{p.name}</div>
+                                    {isTeamsMode && (
+                                        <div className="text-xs opacity-70">
+                                            {(p as Team).members.length} members
+                                        </div>
+                                    )}
+                                </div>
+                                <div className={`font-mono text-xl font-bold ${isBuzzed ? 'text-black' : (p.score >= 0 ? 'text-green-400' : 'text-red-400')}`}>
+                                    <ScoreDisplay score={p.score} />
+                                </div>
+                            </div>
+                            
+                            {isBuzzed && (
+                                <div className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full animate-bounce shadow-sm">
+                                    BUZZ!
+                                </div>
+                            )}
+                        </div>
+                      )
+              })}
+              
+              {players.length === 0 && (
+                  <div className="text-center p-8 text-gray-600 italic">
+                      Waiting for players to join...
                   </div>
-              ))}
+              )}
           </div>
+          
+          {/* QR Code Toggle / Footer */}
+          {phase === GamePhase.LOBBY && qrCodeDataUrl && (
+              <div className="p-4 bg-white text-center border-t border-gray-700">
+                  <p className="text-black text-xs font-bold mb-2 uppercase">Scan to Join</p>
+                  <img src={qrCodeDataUrl} className="w-32 h-32 mx-auto" alt="QR Code" />
+              </div>
+          )}
       </div>
 
-      <div className="flex-1 relative">
-         {phase === GamePhase.BOARD ? (
-             <div className="h-full flex flex-col p-4">
-                 <div className="flex-1 grid gap-2" style={{ gridTemplateColumns: `repeat(${board.categories.length}, 1fr)` }}>
+      {/* MAIN CONTENT AREA */}
+      <div className="flex-1 relative bg-gray-900 flex flex-col">
+          
+          {/* PHASE: LOBBY */}
+          {phase === GamePhase.LOBBY && (
+              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-gradient-to-br from-blue-900/20 to-black">
+                  <h1 className="text-7xl font-display text-jeopardy-gold mb-6 drop-shadow-lg tracking-wider">
+                      {board.title}
+                  </h1>
+                  <p className="text-2xl text-blue-200 mb-12 max-w-2xl leading-relaxed font-light">
+                      Join the game using the code on the left!
+                  </p>
+                  <button 
+                      onClick={startGame}
+                      className="group relative px-12 py-6 bg-green-600 hover:bg-green-500 text-white font-bold text-2xl rounded-2xl shadow-2xl hover:scale-105 transition-all flex items-center gap-4"
+                  >
+                      <div className="p-2 bg-green-700 rounded-full group-hover:bg-green-600 transition-colors">
+                        <Play fill="white" size={24} />
+                      </div>
+                      Start Game
+                  </button>
+              </div>
+          )}
+
+          {/* PHASE: BOARD */}
+          {phase === GamePhase.BOARD && (
+             <div className="flex-1 p-6 overflow-y-auto">
+                 <div className="grid gap-4 h-full" style={{ gridTemplateColumns: `repeat(${board.categories.length}, 1fr)` }}>
                      {board.categories.map(cat => (
-                         <div key={cat.id} className="flex flex-col gap-2">
-                             <div className="bg-blue-900 text-white font-display text-center py-4 text-xl md:text-2xl uppercase shadow-lg border-b-4 border-black items-center justify-center flex h-24 overflow-hidden leading-tight break-words px-1">
+                         <div key={cat.id} className="flex flex-col gap-4">
+                             {/* Category Header */}
+                             <div className="bg-blue-900 text-white font-display text-center py-4 text-xl md:text-2xl uppercase shadow-lg rounded-lg flex items-center justify-center h-28 border-2 border-blue-700">
                                  {cat.title}
                              </div>
+                             {/* Questions */}
                              {cat.questions.map(q => {
                                  const isAnswered = answeredQuestions.includes(q.id);
                                  return (
@@ -526,8 +438,11 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                         disabled={isAnswered}
                                         onClick={() => handleQuestionSelect(cat.id, q)}
                                         className={`
-                                            flex-1 font-display text-3xl md:text-5xl text-jeopardy-gold shadow-lg transition-all duration-300
-                                            ${isAnswered ? 'bg-blue-900/20 text-transparent cursor-default' : 'bg-blue-900 hover:bg-blue-800 hover:scale-[1.02] cursor-pointer'}
+                                            flex-1 font-display text-4xl md:text-5xl text-jeopardy-gold rounded-lg shadow-md transition-all duration-200 flex items-center justify-center min-h-[100px] border-2
+                                            ${isAnswered 
+                                                ? 'bg-blue-900/20 text-transparent cursor-default border-transparent' 
+                                                : 'bg-blue-900/40 border-blue-600 hover:bg-blue-800 hover:scale-[1.02] hover:shadow-jeopardy-gold/20 cursor-pointer'
+                                            }
                                         `}
                                      >
                                          {!isAnswered && `$${q.points}`}
@@ -538,86 +453,105 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                      ))}
                  </div>
              </div>
-         ) : (
-             currentQuestion && (
-                 <div className="absolute inset-0 bg-blue-900 flex flex-col items-center justify-center p-12 text-center">
-                     <div className="max-w-5xl w-full">
-                         {/* Category & Value Header */}
-                         <div className="mb-8 text-blue-300 font-bold uppercase tracking-widest text-xl">
-                             {board.categories.find(c => c.id === currentQuestion.catId)?.title} - ${currentQuestion.q.points}
-                         </div>
+          )}
 
-                         {/* QUESTION CONTENT */}
-                         <div className="min-h-[300px] flex flex-col items-center justify-center mb-8">
-                             {currentQuestion.q.image && (
-                                 <img src={currentQuestion.q.image} className="max-h-[400px] object-contain mb-6 rounded-lg shadow-2xl" />
-                             )}
-                             <h2 className="text-4xl md:text-6xl font-display uppercase leading-tight drop-shadow-md">
-                                 {currentQuestion.q.question}
-                             </h2>
-                         </div>
-                         
-                         {/* TIMER VISUAL */}
-                         {timer !== null && (
-                             <div className="mb-8">
-                                 <div className="flex justify-between text-sm uppercase font-bold text-gray-400 mb-1">
-                                     <span>{timerMode === 'BUZZ' ? 'Time to Buzz' : 'Time to Answer'}</span>
-                                     <span>{timer}s</span>
-                                 </div>
-                                 <TimerBar />
-                             </div>
-                         )}
+          {/* PHASE: QUESTION / ANSWER (OVERLAY) */}
+          {currentQuestion && (
+              <div className="absolute inset-0 bg-gray-900/95 backdrop-blur-md z-30 flex flex-col items-center justify-center p-12 animate-in fade-in zoom-in-95 duration-200">
+                   <div className="max-w-6xl w-full flex flex-col items-center">
+                       {/* Header Info */}
+                       <div className="flex items-center gap-4 mb-8 text-blue-300 font-bold uppercase tracking-widest text-xl">
+                           <span>{board.categories.find(c => c.id === currentQuestion.catId)?.title}</span>
+                           <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                           <span className="text-jeopardy-gold">${currentQuestion.q.points}</span>
+                       </div>
 
-                         {/* CONTROLS */}
-                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                             {/* LEFT: BUZZER STATUS */}
-                             <div className="flex items-center justify-center">
-                                 {buzzedPlayerId ? (
-                                     <div className="bg-white text-black p-6 rounded-xl animate-pulse w-full">
-                                         <span className="block text-sm uppercase text-gray-500 font-bold">Buzzed In</span>
-                                         <h3 className="text-3xl font-bold truncate">
-                                             {isTeamsMode ? `${getBuzzedTeamName()} (${getBuzzedName()})` : getBuzzedName()}
-                                         </h3>
-                                     </div>
-                                 ) : (
-                                     <div className={`w-full p-6 rounded-xl border-2 text-center ${buzzLocked ? 'border-red-500 bg-red-900/20 text-red-500' : 'border-green-500 bg-green-900/20 text-green-500'}`}>
-                                         {buzzLocked ? <div className="flex items-center justify-center gap-2 font-bold"><Lock /> LOCKED</div> : <div className="flex items-center justify-center gap-2 font-bold"><Unlock /> OPEN</div>}
-                                     </div>
-                                 )}
-                             </div>
+                       {/* Main Question Card */}
+                       <div className="bg-blue-900 rounded-3xl p-12 shadow-2xl border border-blue-700 w-full text-center mb-8 relative overflow-hidden">
+                           {/* BG Decoration */}
+                           <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-jeopardy-gold to-blue-500"></div>
+                           
+                           {currentQuestion.q.image && (
+                               <img src={currentQuestion.q.image} className="max-h-[300px] mx-auto mb-8 rounded-lg shadow-lg" />
+                           )}
+                           
+                           <h2 className="text-4xl md:text-6xl font-display uppercase leading-tight text-white drop-shadow-md">
+                               {currentQuestion.q.question}
+                           </h2>
+                       </div>
+                       
+                       {/* Timer & Buzzer State */}
+                       <div className="w-full max-w-3xl mb-8">
+                           {timer !== null && (
+                               <div className="mb-6">
+                                    <div className="flex justify-between text-sm uppercase font-bold text-gray-400 mb-2">
+                                        <span>{timerMode === 'BUZZ' ? 'Time to Buzz' : 'Time to Answer'}</span>
+                                        <span>{timer}s</span>
+                                    </div>
+                                    <TimerBar />
+                               </div>
+                           )}
+                           
+                           {/* Status Indicator */}
+                           <div className="flex justify-center">
+                               {buzzedPlayerId ? (
+                                   <div className="bg-white text-black px-8 py-4 rounded-full font-bold text-2xl animate-pulse shadow-[0_0_30px_rgba(255,255,255,0.3)] flex items-center gap-3">
+                                       <div className="w-4 h-4 bg-red-600 rounded-full animate-ping"></div>
+                                       {isTeamsMode ? `${getBuzzedTeamName()} (${getBuzzedName()})` : getBuzzedName()}
+                                   </div>
+                               ) : (
+                                   <div className={`px-8 py-4 rounded-full font-bold text-xl border-2 flex items-center gap-3 ${buzzLocked ? 'border-red-500/50 text-red-400 bg-red-900/10' : 'border-green-500 text-green-400 bg-green-900/10 animate-bounce'}`}>
+                                       {buzzLocked ? <Lock size={20} /> : <Unlock size={20} />}
+                                       {buzzLocked ? 'BUZZERS LOCKED' : 'BUZZERS OPEN'}
+                                   </div>
+                               )}
+                           </div>
+                       </div>
 
-                             {/* CENTER: HOST ACTIONS */}
-                             <div className="flex flex-col gap-2 justify-center">
-                                 {buzzedPlayerId ? (
-                                     <div className="flex gap-2 w-full h-16">
-                                         <button onClick={handleCorrect} className="flex-1 bg-green-600 hover:bg-green-500 rounded-lg font-bold text-xl shadow-lg">Correct</button>
-                                         <button onClick={handleWrong} className="flex-1 bg-red-600 hover:bg-red-500 rounded-lg font-bold text-xl shadow-lg">Wrong</button>
-                                     </div>
-                                 ) : (
-                                     <button 
-                                        onClick={handleUnlockBuzzers} 
-                                        disabled={!buzzLocked}
-                                        className="w-full h-16 bg-jeopardy-gold hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold text-xl rounded-lg shadow-lg flex items-center justify-center gap-2"
-                                     >
-                                         <Unlock size={24} /> OPEN BUZZERS (Space)
-                                     </button>
-                                 )}
-                             </div>
+                       {/* Controls */}
+                       <div className="grid grid-cols-3 gap-6 w-full max-w-4xl">
+                           {/* Left: Reveal / Back */}
+                           <div className="flex gap-2">
+                               <button onClick={() => setCurrentQuestion(prev => prev ? { ...prev, q: { ...prev.q, question: `Answer: ${prev.q.answer}` }} : null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold p-4 flex items-center justify-center gap-2 transition-colors">
+                                   <Eye size={20} /> Reveal
+                               </button>
+                               <button onClick={handleSkip} className="bg-gray-800 hover:bg-gray-700 text-white rounded-xl font-bold p-4 transition-colors">
+                                   <ArrowRight size={20} />
+                               </button>
+                           </div>
 
-                             {/* RIGHT: NAVIGATION */}
-                             <div className="flex items-center justify-center gap-2">
-                                 <button onClick={() => setCurrentQuestion(prev => prev ? { ...prev, q: { ...prev.q, question: `Answer: ${prev.q.answer}` }} : null)} className="p-4 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold" title="Reveal Answer"><Eye /></button>
-                                 <button onClick={handleSkip} className="p-4 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold" title="Skip/Back"><ArrowRight /></button>
-                             </div>
-                         </div>
-                     </div>
-                 </div>
-             )
-         )}
+                           {/* Center: Open Buzzers (Space) */}
+                           <button 
+                               onClick={handleUnlockBuzzers} 
+                               disabled={!buzzLocked || !!buzzedPlayerId}
+                               className="col-span-1 bg-jeopardy-gold hover:bg-yellow-300 disabled:opacity-30 disabled:cursor-not-allowed text-black font-bold rounded-xl text-xl shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95"
+                           >
+                               <Unlock size={24} /> OPEN
+                           </button>
+
+                           {/* Right: Scoring */}
+                           <div className="flex gap-2">
+                               <button 
+                                   onClick={handleCorrect}
+                                   disabled={!buzzedPlayerId}
+                                   className="flex-1 bg-green-600 hover:bg-green-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 transition-colors"
+                               >
+                                   <Check size={24} /> Correct
+                               </button>
+                               <button 
+                                   onClick={handleWrong}
+                                   disabled={!buzzedPlayerId}
+                                   className="flex-1 bg-red-600 hover:bg-red-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 transition-colors"
+                               >
+                                   <X size={24} /> Wrong
+                               </button>
+                           </div>
+                       </div>
+                   </div>
+              </div>
+          )}
+
       </div>
     </div>
   );
 };
-
-// Keyboard listener for Spacebar to unlock
-function Play(props: any) { return <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> }
