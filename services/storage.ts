@@ -1,6 +1,5 @@
 import { GameBoard, Category, Question } from '../types';
-
-const STORAGE_KEY = 'buzzword_boards';
+import { DatabaseService } from './db';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -25,76 +24,28 @@ export const createEmptyBoard = (ownerId?: string): GameBoard => {
   };
 };
 
-export const saveBoard = (board: GameBoard): void => {
+export const saveBoard = async (board: GameBoard): Promise<void> => {
   // Safety check
   if (!board || typeof board !== 'object' || 'nativeEvent' in board) {
     console.error("Invalid board object passed to saveBoard:", board);
     return;
   }
-
-  // Load ALL boards from storage
-  const allBoards = getAllBoardsRaw();
-  const index = allBoards.findIndex(b => b.id === board.id);
-  
-  if (index >= 0) {
-    allBoards[index] = board;
-  } else {
-    allBoards.push(board);
-  }
-  
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(allBoards));
-  } catch (e) {
-    console.error("Failed to save board to localStorage", e);
-  }
+  await DatabaseService.saveBoard(board);
 };
-
-// Internal helper to get everything regardless of user
-const getAllBoardsRaw = (): GameBoard[] => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch (e) {
-    console.error("Failed to load boards", e);
-    return [];
-  }
-}
 
 // Public getter filtered by user
-export const getBoards = (username?: string | null): GameBoard[] => {
-  const all = getAllBoardsRaw();
-  if (username) {
-      // Return boards owned by this user
-      return all.filter(b => b.ownerId === username);
-  } else {
-      // Return boards with NO owner (Guest boards)
-      return all.filter(b => !b.ownerId);
-  }
+export const getBoards = async (username?: string | null): Promise<GameBoard[]> => {
+    return await DatabaseService.getBoards(username);
 };
 
-export const deleteBoard = (id: string): void => {
-  const allBoards = getAllBoardsRaw();
-  const filtered = allBoards.filter(b => b.id !== id);
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-  } catch (e) {
-    console.error("Failed to update boards after deletion", e);
-  }
+export const deleteBoard = async (id: string): Promise<void> => {
+    await DatabaseService.deleteBoard(id);
 };
 
 // --- SYNC HELPERS ---
-export const saveSyncedBoards = (newBoards: GameBoard[]) => {
-    const existing = getAllBoardsRaw();
-    
-    // Merge strategy: Overwrite existing IDs, add new ones
-    newBoards.forEach(nb => {
-        const idx = existing.findIndex(e => e.id === nb.id);
-        if (idx >= 0) {
-            existing[idx] = nb;
-        } else {
-            existing.push(nb);
-        }
-    });
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
+export const saveSyncedBoards = async (newBoards: GameBoard[]) => {
+    // This is typically used for peer-sync, but we can reuse DB save
+    for (const b of newBoards) {
+        await DatabaseService.saveBoard(b);
+    }
 }

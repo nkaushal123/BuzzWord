@@ -132,9 +132,20 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     // 1. We are in Question Phase
     // 2. We have a question loaded
     // 3. Buzzers are still locked (meaning we haven't opened them yet)
-    // 4. We aren't already listening
-    if (phase === GamePhase.QUESTION && currentQuestion && buzzLocked && !isListening) {
-        startListening();
+    if (phase === GamePhase.QUESTION && currentQuestion && buzzLocked) {
+        const hasText = currentQuestion.q.question && currentQuestion.q.question.trim().length > 0;
+
+        if (!hasText) {
+             // Case: Image Only / No Text -> Auto-open buzzers
+             // We use a timeout to allow the transition animation to play out (e.g. 1.5s)
+             const timer = setTimeout(() => {
+                 handleUnlockBuzzers();
+             }, 1500);
+             return () => clearTimeout(timer);
+        } else if (!isListening) {
+            // Case: Has Text -> Use Speech Recognition
+            startListening();
+        }
     }
   }, [phase, currentQuestion, buzzLocked]);
 
@@ -205,7 +216,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       buzzedPlayerId,
       buzzLocked,
       players,
-      board,
+      // OPTIMIZATION: Send null instead of board. The board contains large image data (base64)
+      // which slows down the sync considerably. Players do not need the board data to play.
+      board: null, 
       isTeamsMode,
       teams,
       blockedPlayerIds,

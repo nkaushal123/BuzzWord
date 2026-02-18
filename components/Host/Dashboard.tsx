@@ -21,23 +21,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
   
   const currentUser = AuthService.getCurrentUser();
 
+  const loadBoards = async () => {
+    const data = await getBoards(currentUser?.username);
+    setBoards(data);
+  };
+
   useEffect(() => {
-    // Load boards specific to this user (or guest boards if null)
-    setBoards(getBoards(currentUser?.username));
+    loadBoards();
   }, [currentUser]);
 
   const handleCreate = (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
-    // Create board attached to current user
     onEdit(createEmptyBoard(currentUser?.username));
   };
 
-  const handleDelete = (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (window.confirm("Are you sure you want to delete this game?")) {
-      deleteBoard(id);
-      setBoards(getBoards(currentUser?.username));
+      await deleteBoard(id);
+      loadBoards();
     }
   };
 
@@ -59,11 +62,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
 
       try {
           const newBoard = await importFromJeopardyLabs(importUrl);
-          // Assign ownership to current user
           if (currentUser) newBoard.ownerId = currentUser.username;
           
-          saveBoard(newBoard);
-          setBoards(getBoards(currentUser?.username));
+          await saveBoard(newBoard);
+          await loadBoards();
           setShowImportModal(false);
           setImportUrl('');
       } catch (err: any) {
@@ -81,19 +83,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
       setIsImporting(true);
 
       try {
-          // This function now handles both JSON and HTML
           const newBoard = await importFromHTMLFile(file);
-          // Assign ownership
           if (currentUser) newBoard.ownerId = currentUser.username;
 
-          saveBoard(newBoard);
-          setBoards(getBoards(currentUser?.username));
+          await saveBoard(newBoard);
+          await loadBoards();
           setShowImportModal(false);
       } catch (err: any) {
           setImportError("Could not parse file. Make sure it is a valid HTML (JeopardyLabs) or JSON (BuzzWord) file.");
       } finally {
           setIsImporting(false);
-          // Reset input
           e.target.value = '';
       }
   };

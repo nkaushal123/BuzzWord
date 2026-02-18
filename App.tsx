@@ -8,10 +8,11 @@ import { AuthScreen } from './components/Auth/AuthScreen';
 import { StatsScreen } from './components/Stats/StatsScreen';
 import { Help } from './components/Help';
 import { DeviceSync } from './components/Sync/DeviceSync';
+import { DatabaseConfig } from './components/Config/DatabaseConfig';
 import { GameBoard, User } from './types';
 import { AuthService } from './services/auth';
 
-type View = 'WELCOME' | 'AUTH' | 'STATS' | 'DASHBOARD' | 'EDITOR' | 'HOST_GAME' | 'PLAYER' | 'HELP' | 'SYNC';
+type View = 'WELCOME' | 'AUTH' | 'STATS' | 'DASHBOARD' | 'EDITOR' | 'HOST_GAME' | 'PLAYER' | 'HELP' | 'SYNC' | 'DB_CONFIG';
 
 function App() {
   const [view, setView] = useState<View>('WELCOME');
@@ -38,13 +39,15 @@ function App() {
     }
   }, []);
 
-  const handleRoleSelect = (role: 'HOST' | 'PLAYER' | 'EDITOR' | 'HELP') => {
+  const handleRoleSelect = (role: 'HOST' | 'PLAYER' | 'EDITOR' | 'HELP' | 'DB_CONFIG') => {
     if (role === 'HOST') {
       setView('DASHBOARD');
     } else if (role === 'EDITOR') {
       setView('DASHBOARD'); 
     } else if (role === 'HELP') {
       setView('HELP');
+    } else if (role === 'DB_CONFIG') {
+      setView('DB_CONFIG');
     } else {
       // For Players, check auth first
       if (currentUser) {
@@ -138,6 +141,10 @@ function App() {
                 setView('WELCOME');
             }}
           />
+      )}
+
+      {view === 'DB_CONFIG' && (
+        <DatabaseConfig onBack={() => setView('WELCOME')} />
       )}
       
       {view === 'HELP' && <Help onBack={() => setView('WELCOME')} />}

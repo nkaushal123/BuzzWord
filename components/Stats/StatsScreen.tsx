@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AuthService } from '../../services/auth';
 import { User, ModeStats } from '../../types';
-import { ArrowLeft, Trophy, Target, Award, Hash, Zap, Users, Shield, Star, DollarSign, Smartphone } from 'lucide-react';
+import { ArrowLeft, Trophy, Target, Award, Hash, Zap, Users, Shield, Star, DollarSign, Smartphone, Loader } from 'lucide-react';
 
 interface StatsScreenProps {
   onBack: () => void;
@@ -13,10 +13,17 @@ export const StatsScreen: React.FC<StatsScreenProps> = ({ onBack, onSync }) => {
   const [leaderboard, setLeaderboard] = useState<User[]>([]);
   const [view, setView] = useState<'ME' | 'GLOBAL'>('ME');
   const [statsMode, setStatsMode] = useState<'SOLO' | 'TEAM'>('SOLO');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setCurrentUser(AuthService.getCurrentUser());
-    setLeaderboard(AuthService.getLeaderboard());
+    const loadData = async () => {
+        setLoading(true);
+        setCurrentUser(AuthService.getCurrentUser());
+        const lb = await AuthService.getLeaderboard();
+        setLeaderboard(lb);
+        setLoading(false);
+    };
+    loadData();
   }, []);
 
   const StatCard = ({ label, value, icon: Icon, color }: any) => (
@@ -77,6 +84,14 @@ export const StatsScreen: React.FC<StatsScreenProps> = ({ onBack, onSync }) => {
         </div>
       );
   };
+
+  if (loading) {
+      return (
+          <div className="min-h-screen bg-black text-white flex items-center justify-center">
+              <Loader className="animate-spin text-jeopardy-gold" size={48} />
+          </div>
+      );
+  }
 
   return (
     <div className="min-h-screen bg-black text-white p-6">

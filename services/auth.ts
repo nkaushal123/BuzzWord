@@ -1,6 +1,6 @@
 import { User, UserStats, ModeStats } from '../types';
+import { DatabaseService } from './db';
 
-const USERS_KEY = 'buzzword_users';
 const CURRENT_USER_KEY = 'buzzword_current_user';
 
 // Initial empty stats helper
@@ -13,23 +13,10 @@ const createEmptyModeStats = (): ModeStats => ({
   bestGameScore: 0
 });
 
-const getUsers = (): User[] => {
-  try {
-    const data = localStorage.getItem(USERS_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveUsers = (users: User[]) => {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-};
-
 export const AuthService = {
   // Sign Up
-  register: (username: string, password?: string): User => {
-    const users = getUsers();
+  register: async (username: string, password?: string): Promise<User> => {
+    const users = await DatabaseService.getUsers();
     if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
       throw new Error('Username already exists');
     }
@@ -47,22 +34,21 @@ export const AuthService = {
       createdAt: Date.now()
     };
 
-    users.push(newUser);
-    saveUsers(users);
+    await DatabaseService.saveUser(newUser);
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(newUser));
     return newUser;
   },
 
   // Login
-  login: (username: string, password?: string): User => {
-    const users = getUsers();
+  login: async (username: string, password?: string): Promise<User> => {
+    const users = await DatabaseService.getUsers();
     const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
     
     if (!user) {
       throw new Error('User not found. Please register.');
     }
 
-    // Simple password check (Client-side only)
+    // Simple password check (Client-side logic)
     if (user.password && user.password !== password) {
         throw new Error('Incorrect password');
     }
@@ -76,15 +62,8 @@ export const AuthService = {
             totalBuzzes: 0,
             dailyDoublesAttempted: 0
         };
-        // Attempt to migrate flat stats if they existed
         // @ts-ignore
         if (user.stats.totalScore) user.stats.solo.totalScore = user.stats.totalScore;
-    }
-
-    // If migrating an old user to add a password
-    if (!user.password && password) {
-        user.password = password;
-        saveUsers(users);
     }
 
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
@@ -105,7 +84,7 @@ export const AuthService = {
   },
 
   // Update Stats - Now accepts a complex update object
-  updateStats: (
+  updateStats: async (
       mode: 'solo' | 'team', 
       updates: Partial<ModeStats>, 
       categoryUpdate?: { title: string; correct: boolean; points: number },
@@ -114,7 +93,8 @@ export const AuthService = {
     const currentUser = AuthService.getCurrentUser();
     if (!currentUser) return;
 
-    const users = getUsers();
+    // Fetch fresh copy from DB to avoid overwrites
+    const users = await DatabaseService.getUsers();
     const userIndex = users.findIndex(u => u.username === currentUser.username);
     
     if (userIndex === -1) return;
@@ -156,14 +136,15 @@ export const AuthService = {
     }
 
     // Save
-    users[userIndex] = user;
-    saveUsers(users);
+    await DatabaseService.saveUser(user);
+    // Update local session
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
     return user;
   },
 
-  getLeaderboard: (): User[] => {
-    // Sort by total score (combined solo + team) or just solo for now
-    return getUsers().sort((a, b) => (b.stats.solo.totalScore + b.stats.team.totalScore) - (a.stats.solo.totalScore + a.stats.team.totalScore));
+  getLeaderboard: async (): Promise<User[]> => {
+    const users = await DatabaseService.getUsers();
+    // Sort by total score (combined solo + team)
+    return users.sort((a, b) => (b.stats.solo.totalScore + b.stats.team.totalScore) - (a.stats.solo.totalScore + a.stats.team.totalScore));
   }
 };

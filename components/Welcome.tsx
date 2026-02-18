@@ -1,8 +1,8 @@
 import React from 'react';
-import { Monitor, Smartphone, Edit3, HelpCircle } from 'lucide-react';
+import { Monitor, Smartphone, Edit3, HelpCircle, Database } from 'lucide-react';
 
 interface WelcomeProps {
-  onSelectRole: (role: 'HOST' | 'PLAYER' | 'EDITOR' | 'HELP') => void;
+  onSelectRole: (role: 'HOST' | 'PLAYER' | 'EDITOR' | 'HELP' | 'DB_CONFIG') => void;
 }
 
 export const Welcome: React.FC<WelcomeProps> = ({ onSelectRole }) => {
@@ -13,6 +13,13 @@ export const Welcome: React.FC<WelcomeProps> = ({ onSelectRole }) => {
          <div className="absolute top-10 left-10 w-32 h-32 bg-yellow-400 rounded-full blur-3xl"></div>
          <div className="absolute bottom-10 right-10 w-64 h-64 bg-blue-500 rounded-full blur-3xl"></div>
       </div>
+
+      <button 
+          onClick={() => onSelectRole('DB_CONFIG')}
+          className="absolute top-4 left-4 flex items-center gap-2 text-gray-500 hover:text-jeopardy-gold transition-colors z-20 text-xs uppercase font-bold"
+      >
+          <Database size={16} /> Config Database
+      </button>
 
       <div className="z-10 text-center max-w-4xl w-full">
         <h1 className="text-6xl md:text-8xl font-display text-jeopardy-gold mb-4 drop-shadow-lg tracking-wider uppercase">
