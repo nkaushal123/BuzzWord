@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
-import { Users, Lock, Unlock, Check, X, ArrowRight, Copy, LogOut, Wifi, WifiOff, Star, DollarSign, Link, Shield, Trash2, UserPlus, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, Copy, LogOut, Wifi, WifiOff, Star, DollarSign, Link, Shield, Trash2, UserPlus, ToggleLeft, ToggleRight, Eye } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
@@ -56,6 +56,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   
   // Daily Double State
   const [dailyDoubleMode, setDailyDoubleMode] = useState(false);
+  const [ddQuestionRevealed, setDdQuestionRevealed] = useState(false); // New state to control question visibility
   const [dailyDoublePlayerId, setDailyDoublePlayerId] = useState<string | null>(null); // For teams mode, this is still the specific player who answers
   const [wager, setWager] = useState<number>(0);
   
@@ -186,6 +187,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       setDailyDoubleMode(true);
       setWager(q.points);
       setDailyDoublePlayerId(null);
+      setDdQuestionRevealed(false); // Ensure hidden initially
     } else {
       setDailyDoubleMode(false);
       setWager(0);
@@ -194,6 +196,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const unlockBuzzers = () => {
     setBuzzLocked(false);
+  };
+
+  const handleRevealDD = () => {
+      setDdQuestionRevealed(true);
   };
 
   const handleCorrect = () => {
@@ -267,6 +273,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     setBuzzLocked(true);
     setShowAnswer(false);
     setDailyDoubleMode(false);
+    setDdQuestionRevealed(false);
     setWager(0);
     setDailyDoublePlayerId(null);
   };
@@ -526,23 +533,33 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                             </div>
                         </div>
                     </div>
-
-                    <div className="flex justify-between gap-2">
+                    
+                    {!ddQuestionRevealed ? (
                         <button 
-                            onClick={handleCorrect}
+                            onClick={handleRevealDD}
                             disabled={!dailyDoublePlayerId}
-                            className="flex-1 py-3 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg"
+                            className="w-full py-4 bg-jeopardy-gold text-black hover:bg-yellow-300 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg uppercase tracking-widest transition-all"
                         >
-                            <Check className="mr-1" size={18} /> Correct
+                            <Eye className="mr-2" size={20} /> Reveal Question
                         </button>
-                        <button 
-                            onClick={handleIncorrect}
-                            disabled={!dailyDoublePlayerId}
-                            className="flex-1 py-3 bg-red-600 hover:bg-red-500 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg"
-                        >
-                            <X className="mr-1" size={18} /> Wrong
-                        </button>
-                    </div>
+                    ) : (
+                        <div className="flex justify-between gap-2 animate-in fade-in slide-in-from-bottom-2">
+                            <button 
+                                onClick={handleCorrect}
+                                disabled={!dailyDoublePlayerId}
+                                className="flex-1 py-3 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg"
+                            >
+                                <Check className="mr-1" size={18} /> Correct
+                            </button>
+                            <button 
+                                onClick={handleIncorrect}
+                                disabled={!dailyDoublePlayerId}
+                                className="flex-1 py-3 bg-red-600 hover:bg-red-500 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg"
+                            >
+                                <X className="mr-1" size={18} /> Wrong
+                            </button>
+                        </div>
+                    )}
                 </div>
             ) : (
                 // --- Standard Controls ---
@@ -644,11 +661,13 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                          )}
                     </div>
 
-                    <div className="mt-12 w-full">
-                        <p className="text-3xl md:text-5xl font-display uppercase text-white leading-tight shadow-black drop-shadow-md break-words">
-                            {currentQuestion.q.question}
-                        </p>
-                    </div>
+                    {ddQuestionRevealed && (
+                        <div className="mt-12 w-full animate-in zoom-in-95 duration-500">
+                            <p className="text-3xl md:text-5xl font-display uppercase text-white leading-tight shadow-black drop-shadow-md break-words">
+                                {currentQuestion.q.question}
+                            </p>
+                        </div>
+                    )}
                 </div>
             ) : (
                 // Standard Question View
