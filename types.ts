@@ -23,6 +23,32 @@ export interface GameBoard {
   categories: Category[];
 }
 
+// User & Stats Types
+export interface ModeStats {
+  gamesPlayed: number;
+  gamesWon: number;
+  totalScore: number; // Cumulative currency
+  questionsAttempted: number;
+  questionsCorrect: number;
+  bestGameScore: number;
+}
+
+export interface UserStats {
+  solo: ModeStats;
+  team: ModeStats;
+  // Track performance by category name (e.g. "Science": { correct: 5, total: 6 })
+  categoryStats: Record<string, { correct: number; wrong: number; pointsEarned: number }>;
+  totalBuzzes: number;
+  dailyDoublesAttempted: number;
+}
+
+export interface User {
+  username: string;
+  password?: string;
+  stats: UserStats;
+  createdAt: number;
+}
+
 // Multiplayer / State Types
 export interface Player {
   id: string;
@@ -38,7 +64,7 @@ export interface Team {
 }
 
 export enum GamePhase {
-  LOBBY = 'LOBBY', // Added LOBBY phase
+  LOBBY = 'LOBBY', 
   BOARD = 'BOARD',
   QUESTION = 'QUESTION',
   ANSWER = 'ANSWER',
@@ -46,7 +72,7 @@ export enum GamePhase {
 }
 
 export interface GameState {
-  lobbyCode: string; // Added lobby code
+  lobbyCode: string;
   phase: GamePhase;
   currentQuestionId: string | null;
   currentCategoryId: string | null;
@@ -60,7 +86,7 @@ export interface GameState {
   isTeamsMode: boolean;
   teams: Team[];
   
-  // Lockout Logic (Incorrect guesses)
+  // Lockout Logic
   blockedPlayerIds: string[];
   blockedTeamIds: string[];
 }
@@ -73,4 +99,7 @@ export type CommsMessage =
   | { type: 'AWARD_POINTS'; payload: { playerId: string; points: number } }
   | { type: 'RESET_BUZZER'; payload: null }
   | { type: 'CREATE_TEAM'; payload: { name: string; playerId: string } }
-  | { type: 'JOIN_TEAM'; payload: { teamId: string; playerId: string } };
+  | { type: 'JOIN_TEAM'; payload: { teamId: string; playerId: string } }
+  // Updated Result Event with Category info
+  | { type: 'RESULT_EVENT'; payload: { playerId: string; correct: boolean; points: number; categoryTitle: string; isDailyDouble: boolean } }
+  | { type: 'GAME_OVER_SUMMARY'; payload: { winners: string[] } };

@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useComms } from '../../services/comms';
-import { GameState, GamePhase, CommsMessage, Team } from '../../types';
-import { Circle, User, Trophy, Lock, Hash, ArrowLeft, Users, Shield, Plus } from 'lucide-react';
+import { AuthService } from '../../services/auth';
+import { GameState, GamePhase, CommsMessage, Team, User } from '../../types';
+import { Circle, User as UserIcon, Trophy, Lock, Hash, ArrowLeft, Users, Shield, Plus, Award } from 'lucide-react';
 
 interface PlayerScreenProps {
   onBack?: () => void;
   initialCode?: string;
+  user?: User | null; // Pass authenticated user
 }
 
-export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode }) => {
-  const [name, setName] = useState('');
+export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode, user }) => {
+  const [name, setName] = useState(user?.username || '');
   const [lobbyCodeInput, setLobbyCodeInput] = useState(initialCode || '');
   const [activeLobbyCode, setActiveLobbyCode] = useState<string>('');
   const [joined, setJoined] = useState(false);
@@ -18,6 +20,13 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode 
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [myScore, setMyScore] = useState(0);
   const [myTeam, setMyTeam] = useState<Team | null>(null);
+  
+  // Local Stats Tracking Session (to accumulate before saving)
+  const sessionStats = useRef({
+    pointsEarned: 0,
+    correct: 0,
+    wrong: 0,
+  });
   
   // Teams UI
   const [newTeamName, setNewTeamName] = useState('');
@@ -29,15 +38,64 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode 
       setGameState(msg.payload);
       
       const me = msg.payload.players.find(p => p.id === playerId);
-      if (me) setMyScore(me.score); // Keep raw score for reference even in teams
+      if (me) setMyScore(me.score); 
 
       if (msg.payload.isTeamsMode) {
           const team = msg.payload.teams.find(t => t.members.includes(playerId));
           setMyTeam(team || null);
-          if (team) setMyScore(team.score); // Override display score with team score
+          if (team) setMyScore(team.score); 
       } else {
           setMyTeam(null);
       }
+    }
+
+    // STATS TRACKING LOGIC
+    if (user && msg.type === 'RESULT_EVENT') {
+        if (msg.payload.playerId === playerId) {
+            const isTeam = gameState?.isTeamsMode ? 'team' : 'solo';
+            
+            // Session tracking
+            if (msg.payload.correct) {
+                sessionStats.current.correct++;
+                sessionStats.current.pointsEarned += msg.payload.points;
+            } else {
+                sessionStats.current.wrong++;
+                sessionStats.current.pointsEarned -= msg.payload.points;
+            }
+
+            // Persistence
+            AuthService.updateStats(
+                isTeam,
+                {
+                    questionsAttempted: 1,
+                    questionsCorrect: msg.payload.correct ? 1 : 0,
+                    totalScore: msg.payload.correct ? msg.payload.points : -msg.payload.points
+                },
+                {
+                    title: msg.payload.categoryTitle,
+                    correct: msg.payload.correct,
+                    points: msg.payload.points
+                },
+                {
+                    totalBuzzes: 1,
+                    dailyDoublesAttempted: msg.payload.isDailyDouble ? 1 : 0
+                }
+            );
+        }
+    }
+
+    if (user && msg.type === 'GAME_OVER_SUMMARY') {
+        const isTeam = gameState?.isTeamsMode ? 'team' : 'solo';
+        const isWinner = msg.payload.winners.includes(playerId);
+        
+        AuthService.updateStats(
+            isTeam,
+            {
+                gamesPlayed: 1,
+                gamesWon: isWinner ? 1 : 0,
+                bestGameScore: sessionStats.current.pointsEarned // Logic inside AuthService handles max() check
+            }
+        );
     }
   });
 
@@ -104,7 +162,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode 
         <div className="w-full max-w-md bg-white/10 backdrop-blur-md p-8 rounded-2xl border border-white/20 shadow-2xl">
           <div className="flex justify-center mb-6">
             <div className="bg-jeopardy-gold p-4 rounded-full shadow-lg">
-              <User className="text-black w-8 h-8" />
+              <UserIcon className="text-black w-8 h-8" />
             </div>
           </div>
           <h2 className="text-2xl font-bold text-center text-white mb-2">Join a Game</h2>
@@ -112,7 +170,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode 
           
           <form onSubmit={handleJoin} className="space-y-4">
             <div className="relative">
-                <User className="absolute left-4 top-3.5 text-gray-400 w-5 h-5" />
+                <UserIcon className="absolute left-4 top-3.5 text-gray-400 w-5 h-5" />
                 <input
                 type="text"
                 value={name}
@@ -120,6 +178,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode 
                 placeholder="Your Name"
                 className="w-full bg-black/50 border border-blue-500 rounded-lg pl-12 pr-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-jeopardy-gold transition-all"
                 autoFocus
+                disabled={!!user} // If logged in, name is locked
                 />
             </div>
             
@@ -306,8 +365,9 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode 
       {/* Header */}
       <div className="bg-gray-800 p-4 shadow-lg flex justify-between items-center z-10 border-b border-gray-700">
         <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold">
+          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold relative">
             {name.charAt(0).toUpperCase()}
+            {user && <div className="absolute -bottom-1 -right-1 bg-green-500 w-3 h-3 rounded-full border border-black" title="Logged In"></div>}
           </div>
           <div className="flex flex-col">
             <span className="font-bold text-white leading-none">{name}</span>
@@ -327,7 +387,15 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode 
         {/* Current Info Overlay */}
         {gameState.phase === GamePhase.BOARD && (
            <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
-             <p className="text-xl text-blue-300 font-light">Watch the main screen</p>
+             <div className="text-center">
+                 <p className="text-xl text-blue-300 font-light mb-4">Watch the main screen</p>
+                 {user && (
+                     <div className="bg-gray-800 p-2 rounded-lg inline-flex items-center gap-2 text-xs text-gray-400">
+                         <Award size={12} className="text-jeopardy-gold" />
+                         <span>Stats are being tracked</span>
+                     </div>
+                 )}
+             </div>
            </div>
         )}
 

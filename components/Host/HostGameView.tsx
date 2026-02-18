@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
-import { Users, Lock, Unlock, Check, X, ArrowRight, Copy, LogOut, Wifi, WifiOff, Star, DollarSign, Link, Shield, Trash2, UserPlus, ToggleLeft, ToggleRight, Eye } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, Copy, LogOut, Wifi, WifiOff, Star, DollarSign, Link, Shield, Trash2, Eye, Trophy, Target, Zap, TrendingDown } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
@@ -9,31 +9,21 @@ interface HostGameViewProps {
   onExit: () => void;
 }
 
-// Sub-component to handle score animation
+// Stats tracking for the current session
+interface SessionStats {
+    buzzes: number;
+    correct: number;
+    wrong: number;
+    dailyDoubles: number;
+    accuracy: number;
+}
+
 const ScoreDisplay: React.FC<{ score: number; className?: string }> = ({ score, className }) => {
-  const [animClass, setAnimClass] = useState('');
-  const prevScore = useRef(score);
-
-  useEffect(() => {
-    if (score > prevScore.current) {
-      setAnimClass('text-green-400 scale-125 brightness-150');
-    } else if (score < prevScore.current) {
-      setAnimClass('text-red-500 scale-125 brightness-150');
-    }
-    
-    const timer = setTimeout(() => {
-      setAnimClass('');
-      prevScore.current = score;
-    }, 600);
-
-    return () => clearTimeout(timer);
-  }, [score]);
-
-  return (
-    <span className={`transition-all duration-500 transform inline-block ${animClass} ${className}`}>
-      ${score}
-    </span>
-  );
+    return (
+        <span className={className}>
+            {score < 0 ? '-' : ''}${Math.abs(score)}
+        </span>
+    );
 };
 
 export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, onExit }) => {
@@ -53,20 +43,31 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const [showAnswer, setShowAnswer] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [gamePhase, setGamePhase] = useState<GamePhase>(GamePhase.LOBBY);
+  const [showGameSummary, setShowGameSummary] = useState(false);
+
+  // Stats Tracking Refs (Session only)
+  const playerStatsRef = useRef<Record<string, SessionStats>>({});
   
   // Daily Double State
   const [dailyDoubleMode, setDailyDoubleMode] = useState(false);
-  const [ddQuestionRevealed, setDdQuestionRevealed] = useState(false); // New state to control question visibility
-  const [dailyDoublePlayerId, setDailyDoublePlayerId] = useState<string | null>(null); // For teams mode, this is still the specific player who answers
+  const [ddQuestionRevealed, setDdQuestionRevealed] = useState(false);
+  const [dailyDoublePlayerId, setDailyDoublePlayerId] = useState<string | null>(null); 
   const [wager, setWager] = useState<number>(0);
-  
-  const [gamePhase, setGamePhase] = useState<GamePhase>(GamePhase.LOBBY);
+
+  // Initialize stats when player joins
+  const initPlayerStats = (id: string) => {
+      if (!playerStatsRef.current[id]) {
+          playerStatsRef.current[id] = { buzzes: 0, correct: 0, wrong: 0, dailyDoubles: 0, accuracy: 0 };
+      }
+  };
 
   // Use Comms with HOST role
   const { sendMessage, isConnected } = useComms(lobbyCode, 'HOST', (msg: CommsMessage) => {
     if (msg.type === 'PLAYER_JOIN') {
       setPlayers(prev => {
         if (prev.find(p => p.id === msg.payload.id)) return prev;
+        initPlayerStats(msg.payload.id);
         return [...prev, { id: msg.payload.id, name: msg.payload.name, score: 0 }];
       });
     }
@@ -86,12 +87,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     if (msg.type === 'JOIN_TEAM') {
         setTeams(prev => prev.map(t => {
             if (t.id === msg.payload.teamId) {
-                // Add player if not already in team
                 if (!t.members.includes(msg.payload.playerId)) {
                     return { ...t, members: [...t.members, msg.payload.playerId] };
                 }
             } else {
-                // Remove player from other teams to ensure unique membership
                 if (t.members.includes(msg.payload.playerId)) {
                     return { ...t, members: t.members.filter(m => m !== msg.payload.playerId) };
                 }
@@ -105,15 +104,19 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         // Check Lockouts
         if (isTeamsMode) {
             const playerTeam = teams.find(t => t.members.includes(msg.payload.playerId));
-            if (playerTeam && blockedTeamIds.includes(playerTeam.id)) return; // Team is blocked
+            if (playerTeam && blockedTeamIds.includes(playerTeam.id)) return;
         } else {
-            if (blockedPlayerIds.includes(msg.payload.playerId)) return; // Player is blocked
+            if (blockedPlayerIds.includes(msg.payload.playerId)) return;
         }
 
         setBuzzedPlayerId(msg.payload.playerId);
         setBuzzLocked(true);
         
-        // Immediate Sync
+        // Track Buzz Stats
+        if (playerStatsRef.current[msg.payload.playerId]) {
+            playerStatsRef.current[msg.payload.playerId].buzzes++;
+        }
+
         sendMessage({
            type: 'HOST_SYNC',
            payload: {
@@ -136,7 +139,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     }
   });
 
-  // Helper to broadcast state to all players
   const broadcastState = useCallback(() => {
     const state: GameState = {
       lobbyCode,
@@ -156,16 +158,32 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     sendMessage({ type: 'HOST_SYNC', payload: state });
   }, [players, teams, answeredQuestions, currentQuestion, buzzedPlayerId, buzzLocked, showAnswer, gamePhase, lobbyCode, sendMessage, isTeamsMode, blockedPlayerIds, blockedTeamIds]);
 
-  // Keep state synced
   useEffect(() => {
-    if(isConnected) {
-        broadcastState();
-    }
+    if(isConnected) broadcastState();
   }, [broadcastState, isConnected]);
 
-  // Actions
   const startGame = () => {
     setGamePhase(GamePhase.BOARD);
+  };
+
+  const endGame = () => {
+      setShowGameSummary(true);
+  };
+  
+  const reallyExit = () => {
+      // Calculate Winners for stats persistence
+      let winners: string[] = [];
+      if (isTeamsMode) {
+          const highestScore = Math.max(...teams.map(t => t.score));
+          const winningTeams = teams.filter(t => t.score === highestScore);
+          winners = winningTeams.flatMap(t => t.members);
+      } else {
+          const highestScore = Math.max(...players.map(p => p.score));
+          winners = players.filter(p => p.score === highestScore).map(p => p.id);
+      }
+
+      sendMessage({ type: 'GAME_OVER_SUMMARY', payload: { winners } });
+      onExit();
   };
 
   const deleteTeam = (teamId: string) => {
@@ -179,15 +197,14 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     setShowAnswer(false);
     setBuzzedPlayerId(null);
     setBuzzLocked(true);
-    setBlockedPlayerIds([]); // Reset lockouts for new question
+    setBlockedPlayerIds([]); 
     setBlockedTeamIds([]);
     
-    // Check for Daily Double
     if (q.isDailyDouble) {
       setDailyDoubleMode(true);
       setWager(q.points);
       setDailyDoublePlayerId(null);
-      setDdQuestionRevealed(false); // Ensure hidden initially
+      setDdQuestionRevealed(false);
     } else {
       setDailyDoubleMode(false);
       setWager(0);
@@ -210,8 +227,13 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
     if (!playerIdToScore) return;
 
+    // Update Stats
+    if (playerStatsRef.current[playerIdToScore]) {
+        playerStatsRef.current[playerIdToScore].correct++;
+        if(dailyDoubleMode) playerStatsRef.current[playerIdToScore].dailyDoubles++;
+    }
+
     if (isTeamsMode) {
-        // Find team
         const team = teams.find(t => t.members.includes(playerIdToScore));
         if (team) {
             setTeams(prev => prev.map(t => t.id === team.id ? { ...t, score: t.score + points } : t));
@@ -219,6 +241,20 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     } else {
         setPlayers(prev => prev.map(p => p.id === playerIdToScore ? { ...p, score: p.score + points } : p));
     }
+
+    // Determine category title
+    const categoryTitle = board.categories.find(c => c.id === currentQuestion.catId)?.title || "Unknown";
+
+    sendMessage({
+        type: 'RESULT_EVENT',
+        payload: { 
+            playerId: playerIdToScore, 
+            correct: true, 
+            points, 
+            categoryTitle, 
+            isDailyDouble: dailyDoubleMode 
+        }
+    });
 
     setDailyDoubleMode(false);
     revealAnswer();
@@ -232,28 +268,40 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
     if (!playerIdToScore) return;
 
+    // Update Stats
+    if (playerStatsRef.current[playerIdToScore]) {
+        playerStatsRef.current[playerIdToScore].wrong++;
+        if(dailyDoubleMode) playerStatsRef.current[playerIdToScore].dailyDoubles++;
+    }
+
     if (isTeamsMode) {
         const team = teams.find(t => t.members.includes(playerIdToScore));
         if (team) {
-            // Deduct Points
             setTeams(prev => prev.map(t => t.id === team.id ? { ...t, score: t.score - points } : t));
-            
-            // Add Team to Blocked List (unless Daily Double which forces end of turn anyway usually, but logic holds)
             setBlockedTeamIds(prev => [...prev, team.id]);
         }
     } else {
-        // Deduct Points
         setPlayers(prev => prev.map(p => p.id === playerIdToScore ? { ...p, score: p.score - points } : p));
-        
-        // Add Player to Blocked List
         setBlockedPlayerIds(prev => [...prev, playerIdToScore]);
     }
+
+    const categoryTitle = board.categories.find(c => c.id === currentQuestion.catId)?.title || "Unknown";
+
+    sendMessage({
+        type: 'RESULT_EVENT',
+        payload: { 
+            playerId: playerIdToScore, 
+            correct: false, 
+            points, 
+            categoryTitle, 
+            isDailyDouble: dailyDoubleMode 
+        }
+    });
 
     if (dailyDoubleMode) {
         setDailyDoubleMode(false);
         revealAnswer();
     } else {
-        // Incorrect guess in normal mode: reset buzzer and re-open for others
         setBuzzedPlayerId(null);
         setBuzzLocked(false);
     }
@@ -284,6 +332,121 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // --- GAME SUMMARY VIEW (Mario Party Style) ---
+  if (showGameSummary) {
+      // Sort entities by score
+      const sortedEntities = (isTeamsMode ? teams : players).sort((a,b) => b.score - a.score);
+      const winner = sortedEntities[0];
+      
+      // Calculate Badges
+      const getBadges = (entity: Player | Team) => {
+          const badges = [];
+          
+          let myStats = { correct: 0, wrong: 0, buzzes: 0, accuracy: 0 };
+          
+          if (isTeamsMode) {
+              const team = entity as Team;
+              // Aggregate stats for team members
+              team.members.forEach(pid => {
+                  const s = playerStatsRef.current[pid];
+                  if(s) {
+                      myStats.correct += s.correct;
+                      myStats.wrong += s.wrong;
+                      myStats.buzzes += s.buzzes;
+                  }
+              });
+          } else {
+             const s = playerStatsRef.current[entity.id];
+             if(s) myStats = { ...s, accuracy: 0 }; // ref copy
+          }
+          
+          const totalAttempts = myStats.correct + myStats.wrong;
+          const accuracy = totalAttempts > 0 ? myStats.correct / totalAttempts : 0;
+
+          if (accuracy >= 0.9 && totalAttempts > 3) badges.push({ icon: Target, label: "The Sniper", color: "text-green-400" });
+          if (accuracy <= 0.3 && totalAttempts > 3) badges.push({ icon: TrendingDown, label: "Rough Day", color: "text-red-400" });
+          if (myStats.buzzes > 10) badges.push({ icon: Zap, label: "Trigger Happy", color: "text-yellow-400" });
+          
+          return badges;
+      };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-900 to-black text-white flex flex-col items-center justify-center p-8">
+            <h1 className="text-6xl font-display text-jeopardy-gold mb-8 drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)]">GAME SUMMARY</h1>
+            
+            <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-6 items-end mb-12">
+                 {/* 2nd Place */}
+                 {sortedEntities[1] && (
+                     <div className="bg-gray-800/80 border-t-4 border-gray-400 rounded-t-xl p-6 flex flex-col items-center transform translate-y-4">
+                         <div className="text-gray-400 font-bold text-xl mb-2">2nd Place</div>
+                         <div className="text-3xl font-bold mb-2">{sortedEntities[1].name}</div>
+                         <div className="text-4xl font-display text-green-400">${sortedEntities[1].score}</div>
+                         <div className="flex gap-2 mt-4">
+                            {getBadges(sortedEntities[1]).map((b, i) => (
+                                <div key={i} className={`flex flex-col items-center ${b.color}`} title={b.label}>
+                                    <b.icon size={24} />
+                                </div>
+                            ))}
+                         </div>
+                     </div>
+                 )}
+                 
+                 {/* 1st Place */}
+                 {sortedEntities[0] && (
+                     <div className="bg-blue-900/90 border-t-8 border-jeopardy-gold rounded-t-2xl p-8 flex flex-col items-center z-10 shadow-[0_0_50px_rgba(255,204,0,0.3)]">
+                         <Trophy size={64} className="text-jeopardy-gold mb-4 animate-bounce" />
+                         <div className="text-jeopardy-gold font-bold text-2xl mb-2">WINNER</div>
+                         <div className="text-5xl font-bold mb-4">{sortedEntities[0].name}</div>
+                         <div className="text-6xl font-display text-green-400 mb-6">${sortedEntities[0].score}</div>
+                         <div className="flex gap-4">
+                            {getBadges(sortedEntities[0]).map((b, i) => (
+                                <div key={i} className={`flex flex-col items-center ${b.color} bg-black/30 p-2 rounded`} title={b.label}>
+                                    <b.icon size={24} />
+                                    <span className="text-xs mt-1">{b.label}</span>
+                                </div>
+                            ))}
+                         </div>
+                     </div>
+                 )}
+
+                 {/* 3rd Place */}
+                 {sortedEntities[2] && (
+                     <div className="bg-gray-800/80 border-t-4 border-orange-700 rounded-t-xl p-6 flex flex-col items-center transform translate-y-8">
+                         <div className="text-orange-700 font-bold text-xl mb-2">3rd Place</div>
+                         <div className="text-3xl font-bold mb-2">{sortedEntities[2].name}</div>
+                         <div className="text-4xl font-display text-green-400">${sortedEntities[2].score}</div>
+                          <div className="flex gap-2 mt-4">
+                            {getBadges(sortedEntities[2]).map((b, i) => (
+                                <div key={i} className={`flex flex-col items-center ${b.color}`} title={b.label}>
+                                    <b.icon size={24} />
+                                </div>
+                            ))}
+                         </div>
+                     </div>
+                 )}
+            </div>
+
+            {/* Rest of the leaderboard */}
+            <div className="w-full max-w-2xl bg-black/40 rounded-xl p-6 max-h-[300px] overflow-y-auto mb-8">
+                {sortedEntities.slice(3).map((entity, idx) => (
+                    <div key={entity.id} className="flex justify-between items-center border-b border-gray-700 py-3 px-4">
+                        <span className="text-gray-400 font-mono w-8">#{idx + 4}</span>
+                        <span className="font-bold flex-1">{entity.name}</span>
+                        <span className="font-mono text-green-400">${entity.score}</span>
+                    </div>
+                ))}
+            </div>
+
+            <button 
+                onClick={reallyExit}
+                className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-4 px-12 rounded-full text-xl shadow-lg transition-transform hover:scale-105"
+            >
+                Return to Dashboard
+            </button>
+        </div>
+      );
+  }
 
   // --- LOBBY VIEW ---
   if (gamePhase === GamePhase.LOBBY) {
@@ -628,15 +791,14 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         )}
 
         <div className="p-4 border-t border-gray-800">
-          <button onClick={onExit} className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded transition-colors flex items-center justify-center gap-2">
-             <LogOut size={16} /> End Game
+          <button onClick={endGame} className="w-full py-2 bg-red-900/50 hover:bg-red-800 text-red-200 rounded transition-colors flex items-center justify-center gap-2 border border-red-900">
+             <Trophy size={16} /> Finish Game
           </button>
         </div>
       </div>
 
       {/* RIGHT: Game Board */}
       <div className="flex-1 flex flex-col bg-blue-950 relative overflow-hidden">
-        {/* Same Question/Board UI as before, omitted for brevity since unchanged logic-wise */}
         {currentQuestion && (
           <div className="absolute inset-0 z-50 bg-jeopardy-blue/95 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
             {dailyDoubleMode ? (
