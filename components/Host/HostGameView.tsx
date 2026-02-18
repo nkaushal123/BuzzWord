@@ -4,7 +4,7 @@ import { GoogleGenAI, LiveServerMessage, FunctionDeclaration, Blob, Modality } f
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal, Mic, MicOff, Sparkles } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal, Mic, MicOff, Sparkles, Youtube, StopCircle } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
@@ -53,6 +53,14 @@ function createBlob(data: Float32Array): Blob {
   };
 }
 
+// --- HELPER FOR YOUTUBE ---
+const getYoutubeId = (url: string | undefined) => {
+    if (!url) return null;
+    const regExp = /^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|shorts\/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[1].length === 11) ? match[1] : null;
+};
+
 export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, onExit }) => {
   // Game State
   const [players, setPlayers] = useState<Player[]>([]);
@@ -90,6 +98,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [isQrExpanded, setIsQrExpanded] = useState(false);
   const [showDetailedStats, setShowDetailedStats] = useState(false); 
+
+  // --- AUDIO STATE ---
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
   // --- AI LISTENING STATE ---
   const [isAiListening, setIsAiListening] = useState(false);
@@ -180,6 +191,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
             setBuzzLocked(true);
             soundService.play('BUZZ');
             stopAiListening(); // Stop AI if someone buzzes (just in case)
+            setIsPlayingAudio(false); // Stop YouTube audio on buzz
             
             // TIMER: Switch to 5 second answer timer
             setTimerMode('ANSWER');
@@ -251,6 +263,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       if (window.confirm("Are you sure you want to end the game?")) {
           setPhase(GamePhase.GAME_OVER);
           stopAiListening();
+          setIsPlayingAudio(false);
           
           // Calculate winners
           const participants = isTeamsMode ? teams : players;
@@ -269,6 +282,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     
     // Stop any previous instance first to ensure clean state
     stopAiListening();
+    setIsPlayingAudio(false);
     
     setCurrentQuestion({ catId, q });
     setPhase(GamePhase.QUESTION);
@@ -452,6 +466,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const handleCorrect = () => {
     if (!currentQuestion || !buzzedPlayerId) return;
     stopAiListening();
+    setIsPlayingAudio(false);
 
     soundService.play('CORRECT');
     const points = currentQuestion.q.points;
@@ -512,6 +527,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const handleWrong = () => {
     if (!currentQuestion || !buzzedPlayerId) return;
     stopAiListening();
+    setIsPlayingAudio(false);
 
     soundService.play('WRONG');
     const points = currentQuestion.q.points;
@@ -572,6 +588,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const handleSkip = () => {
     if (!currentQuestion) return;
     stopAiListening();
+    setIsPlayingAudio(false);
     setAnsweredQuestions(prev => [...prev, currentQuestion.q.id]);
     setPhase(GamePhase.BOARD);
     setCurrentQuestion(null);
@@ -1032,6 +1049,19 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                     <Mic size={14} /> Listening for end of question...
                                 </div>
                             )}
+
+                            {/* Audio Player (Hidden Iframe) */}
+                            {isPlayingAudio && currentQuestion.q.youtubeUrl && (
+                                <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute' }}>
+                                    <iframe 
+                                        width="1" 
+                                        height="1" 
+                                        src={`https://www.youtube.com/embed/${getYoutubeId(currentQuestion.q.youtubeUrl)}?autoplay=1&controls=0&disablekb=1&fs=0`} 
+                                        title="Audio Player"
+                                        allow="autoplay"
+                                    ></iframe>
+                                </div>
+                            )}
                        </div>
                        
                        {/* Timer & Buzzer State */}
@@ -1084,15 +1114,28 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                     <Unlock size={24} /> OPEN
                                 </button>
                                 
-                                {/* Magic Mic Button - now acts as a Toggle/Stop */}
-                                <button
-                                    onClick={isAiListening ? stopAiListening : startAiListening}
-                                    disabled={!buzzLocked || !!buzzedPlayerId}
-                                    className={`w-16 rounded-xl flex items-center justify-center transition-all ${isAiListening ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 hover:bg-gray-700 text-jeopardy-gold disabled:opacity-30'}`}
-                                    title={isAiListening ? "Stop Auto-Listening" : "Start Auto-Listening (Manual)"}
-                                >
-                                    {isAiListening ? <MicOff size={24} /> : <Sparkles size={24} />}
-                                </button>
+                                <div className="flex flex-col gap-1">
+                                    {/* Magic Mic Button - now acts as a Toggle/Stop */}
+                                    <button
+                                        onClick={isAiListening ? stopAiListening : startAiListening}
+                                        disabled={!buzzLocked || !!buzzedPlayerId}
+                                        className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${isAiListening ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 hover:bg-gray-700 text-jeopardy-gold disabled:opacity-30'}`}
+                                        title={isAiListening ? "Stop Auto-Listening" : "Start Auto-Listening (Manual)"}
+                                    >
+                                        {isAiListening ? <MicOff size={24} /> : <Sparkles size={24} />}
+                                    </button>
+                                </div>
+
+                                {/* Audio Button (Only if URL exists) */}
+                                {currentQuestion.q.youtubeUrl && (
+                                    <button
+                                        onClick={() => setIsPlayingAudio(!isPlayingAudio)}
+                                        className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${isPlayingAudio ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-800 hover:bg-gray-700 text-blue-400'}`}
+                                        title={isPlayingAudio ? "Stop Audio" : "Play Audio Clue"}
+                                    >
+                                        {isPlayingAudio ? <StopCircle size={24} /> : <Youtube size={24} />}
+                                    </button>
+                                )}
                            </div>
 
                            {/* Right: Scoring */}

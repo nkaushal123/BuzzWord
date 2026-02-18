@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GameBoard, Category, Question } from '../../types';
 import { saveBoard } from '../../services/storage';
-import { Save, ArrowLeft, Plus, Image as ImageIcon, Trash2, Info, X, Star } from 'lucide-react';
+import { Save, ArrowLeft, Plus, Image as ImageIcon, Trash2, Info, X, Star, Youtube } from 'lucide-react';
 
 interface BoardEditorProps {
   initialBoard: GameBoard;
@@ -222,7 +222,7 @@ export const BoardEditor: React.FC<BoardEditorProps> = ({ initialBoard, onSave, 
               {/* Questions */}
               {cat.questions.map((q, qIndex) => {
                 const isEditing = editingCell?.catIndex === cIndex && editingCell?.qIndex === qIndex;
-                const hasContent = q.question.trim() || q.answer.trim() || q.image;
+                const hasContent = q.question.trim() || q.answer.trim() || q.image || q.youtubeUrl;
 
                 return (
                   <div key={q.id} className="relative group">
@@ -243,6 +243,11 @@ export const BoardEditor: React.FC<BoardEditorProps> = ({ initialBoard, onSave, 
                          <span className="absolute top-1 right-1">
                             <Star className="w-4 h-4 text-jeopardy-gold fill-current" />
                          </span>
+                      )}
+                      {q.youtubeUrl && (
+                        <span className="absolute bottom-1 right-1">
+                            <Youtube className="w-4 h-4 text-red-500 fill-current" />
+                        </span>
                       )}
                       {q.image && (
                           <div className="absolute inset-0 opacity-20">
@@ -301,6 +306,18 @@ export const BoardEditor: React.FC<BoardEditorProps> = ({ initialBoard, onSave, 
                                     onChange={(e) => handleQuestionChange(cIndex, qIndex, 'answer', e.target.value)}
                                     placeholder="e.g. What is Mars?"
                                 />
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-400 mb-2 flex items-center gap-2">
+                                      <Youtube size={14} /> YouTube Audio URL (Audio Only)
+                                  </label>
+                                  <input
+                                      className="w-full bg-black/50 border border-gray-600 rounded-lg p-4 text-sm focus:ring-2 focus:ring-jeopardy-gold outline-none font-mono text-blue-300"
+                                      value={q.youtubeUrl || ''}
+                                      onChange={(e) => handleQuestionChange(cIndex, qIndex, 'youtubeUrl', e.target.value)}
+                                      placeholder="https://www.youtube.com/watch?v=..."
+                                  />
                                 </div>
                             </div>
 
