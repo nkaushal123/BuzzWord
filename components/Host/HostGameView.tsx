@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal, Mic, MicOff, Sparkles, Youtube, StopCircle } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal, Mic, MicOff, Sparkles, Youtube, StopCircle, UserMinus } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
@@ -164,6 +164,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
             stopListening(); // Stop listening if someone buzzes
             setIsPlayingAudio(false); // Stop YouTube audio on buzz
             
+            // Send fast update to lock screens immediately
+            sendMessage({ type: 'BUZZER_STATUS', payload: { isOpen: false } });
+
             // TIMER: Switch to 5 second answer timer
             setTimerMode('ANSWER');
             setTimer(5);
@@ -248,6 +251,29 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       }
   };
 
+  const handleKickPlayer = (playerId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm("Kick this player?")) return;
+
+    // Send kick message to player
+    sendMessage({ type: 'KICK_PLAYER', payload: { playerId } });
+
+    // Update state to remove player
+    setPlayers(prev => prev.filter(p => p.id !== playerId));
+    
+    // Also remove from teams if applicable
+    setTeams(prev => prev.map(t => ({
+        ...t,
+        members: t.members.filter(id => id !== playerId)
+    })));
+
+    // If they were currently buzzed in, reset
+    if (buzzedPlayerId === playerId) {
+        setBuzzedPlayerId(null);
+        setBuzzLocked(false);
+    }
+  };
+
   const handleQuestionSelect = (catId: string, q: Question) => {
     if (answeredQuestions.includes(q.id)) return;
     
@@ -329,6 +355,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   };
 
   const handleUnlockBuzzers = () => {
+    // FAST PATH: Send a lightweight message immediately before React state updates/syncs
+    // This dramatically reduces latency perception
+    sendMessage({ type: 'BUZZER_STATUS', payload: { isOpen: true } });
+
     setBuzzLocked(false);
     setTimerMode('BUZZ');
     setTimer(10);
@@ -820,13 +850,13 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                         <div 
                             key={p.id} 
                             className={`
-                                relative p-4 rounded-xl border-2 transition-all duration-300
+                                relative p-4 rounded-xl border-2 transition-all duration-300 group
                                 ${isBuzzed ? 'bg-jeopardy-gold border-white scale-105 shadow-xl text-black' : 'bg-gray-700/50 border-gray-600 text-white'}
                                 ${isBlocked ? 'opacity-50 grayscale' : ''}
                             `}
                         >
                             <div className="flex justify-between items-start">
-                                <div>
+                                <div className="pr-6">
                                     <div className="font-bold text-lg leading-tight mb-1">{p.name}</div>
                                     {isTeamsMode && (
                                         <div className="text-xs opacity-70">
@@ -838,6 +868,17 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                     <ScoreDisplay score={p.score} />
                                 </div>
                             </div>
+                            
+                            {/* Kick Button (Hover) - Not for teams since it's messy */}
+                            {!isTeamsMode && (
+                                <button 
+                                    onClick={(e) => handleKickPlayer(p.id, e)}
+                                    className="absolute top-2 right-2 p-1.5 rounded-full bg-red-600/0 text-red-500 hover:bg-red-600 hover:text-white opacity-0 group-hover:opacity-100 transition-all"
+                                    title="Kick Player"
+                                >
+                                    <UserMinus size={14} />
+                                </button>
+                            )}
                             
                             {isBuzzed && (
                                 <div className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full animate-bounce shadow-sm">

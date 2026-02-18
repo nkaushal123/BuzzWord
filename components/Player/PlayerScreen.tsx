@@ -26,6 +26,10 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
   const [gameEnded, setGameEnded] = useState(false);
   const [amIWinner, setAmIWinner] = useState(false);
 
+  // Fast Path Latency Optimization
+  // We use this to override the slow synced gameState.buzzLocked value temporarily
+  const [localBuzzerOverride, setLocalBuzzerOverride] = useState<boolean | null>(null);
+
   // Local Stats Tracking Session (to accumulate before saving)
   const sessionStats = useRef({
     pointsEarned: 0,
@@ -42,6 +46,10 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
     if (msg.type === 'HOST_SYNC') {
       setGameState(msg.payload);
       
+      // When the full sync arrives, we can generally clear the fast-path override
+      // unless it conflicts significantly, but usually the sync is the source of truth eventually.
+      setLocalBuzzerOverride(null); 
+      
       const me = msg.payload.players.find(p => p.id === playerId);
       if (me) setMyScore(me.score); 
 
@@ -52,6 +60,21 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
       } else {
           setMyTeam(null);
       }
+    }
+
+    // Handle Kicked
+    if (msg.type === 'KICK_PLAYER') {
+        if (msg.payload.playerId === playerId) {
+            alert("You have been kicked from the game.");
+            setJoined(false);
+            setGameState(null);
+            setActiveLobbyCode('');
+        }
+    }
+
+    // Handle Fast Buzzer Status (Latency Fix)
+    if (msg.type === 'BUZZER_STATUS') {
+        setLocalBuzzerOverride(msg.payload.isOpen);
     }
 
     // Handle lightweight time sync to avoid laggy timer
@@ -135,6 +158,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
     if (joined && isConnected && gameState && name) {
         const amIRegistered = gameState.players.some(p => p.id === playerId);
         if (!amIRegistered) {
+            // Only heal if we haven't been explicitly kicked (logic handled by KICK_PLAYER message setting joined=false)
             const timeout = setTimeout(() => {
                 sendMessage({ type: 'PLAYER_JOIN', payload: { id: playerId, name } });
             }, 2000); 
@@ -145,9 +169,16 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
 
   const handleBuzz = () => {
     if (!gameState) return;
-    if (gameState.buzzLocked) return;
+    
+    // Check lock state (Prefer fast override if available)
+    const isLocked = localBuzzerOverride !== null ? !localBuzzerOverride : gameState.buzzLocked;
+
+    if (isLocked) return;
     if (gameState.phase !== GamePhase.QUESTION) return;
     if (gameState.buzzedPlayerId) return;
+
+    // Fast Path: Lock locally immediately so user feels instant response
+    setLocalBuzzerOverride(false); 
 
     sendMessage({ type: 'BUZZ', payload: { playerId } });
   };
@@ -374,7 +405,9 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
   }
 
   const isQuestionPhase = gameState.phase === GamePhase.QUESTION;
-  const buzzersOpen = !gameState.buzzLocked;
+  
+  // Calculate Buzzers Open using Fast Override if available, falling back to synced state
+  const buzzersOpen = localBuzzerOverride !== null ? localBuzzerOverride : !gameState.buzzLocked;
 
   // Determine Buzzer Color & Text
   let buzzerColorClass = "bg-red-600 border-red-800 shadow-red-900/50"; // Default (Locked/Idle)

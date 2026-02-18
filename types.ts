@@ -1,4 +1,5 @@
 
+
 // Game Content Types
 export interface Question {
   id: string;
@@ -109,4 +110,6 @@ export type CommsMessage =
   | { type: 'GAME_OVER_SUMMARY'; payload: { winners: string[] } }
   | { type: 'TIME_SYNC'; payload: { timer: number; timerMode: 'BUZZ' | 'ANSWER' | null } }
   | { type: 'SYNC_REQUEST'; payload: null }
-  | { type: 'SYNC_DATA'; payload: { user: User; boards: GameBoard[] } };
+  | { type: 'SYNC_DATA'; payload: { user: User; boards: GameBoard[] } }
+  | { type: 'KICK_PLAYER'; payload: { playerId: string } }
+  | { type: 'BUZZER_STATUS'; payload: { isOpen: boolean } };
