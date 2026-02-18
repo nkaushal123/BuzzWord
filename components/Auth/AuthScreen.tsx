@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { AuthService } from '../../services/auth';
 import { User } from '../../types';
-import { UserCircle, ArrowRight, Lock, Loader } from 'lucide-react';
+import { UserCircle, ArrowRight, Lock } from 'lucide-react';
 
 interface AuthScreenProps {
   onSuccess: (user: User) => void;
   onGuest: () => void;
   onBack: () => void;
-  onSync?: () => void; 
+  onSync?: () => void; // Deprecated but kept for type compat if needed
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBack }) => {
@@ -15,31 +15,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
     
     if (!username.trim() || !password.trim()) {
       setError('Please enter username and password');
-      setLoading(false);
       return;
     }
 
     try {
       let user;
       if (isLogin) {
-        user = await AuthService.login(username, password);
+        user = AuthService.login(username, password);
       } else {
-        user = await AuthService.register(username, password);
+        user = AuthService.register(username, password);
       }
       onSuccess(user);
     } catch (err: any) {
-      setError(err.message || 'Authentication failed');
-    } finally {
-      setLoading(false);
+      setError(err.message);
     }
   };
 
@@ -71,7 +66,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
               className="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-jeopardy-gold outline-none transition-colors"
               placeholder="Username"
               autoFocus
-              disabled={loading}
             />
           </div>
 
@@ -84,8 +78,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-black border border-gray-700 rounded-lg p-3 pl-10 text-white focus:border-jeopardy-gold outline-none transition-colors"
-                placeholder="Password"
-                disabled={loading}
+                placeholder="Password (for syncing devices)"
                 />
             </div>
           </div>
@@ -98,11 +91,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
 
           <button 
             type="submit" 
-            disabled={loading}
-            className="w-full bg-jeopardy-gold hover:bg-yellow-300 disabled:opacity-50 text-black font-bold py-3 rounded-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+            className="w-full bg-jeopardy-gold hover:bg-yellow-300 text-black font-bold py-3 rounded-lg transition-transform active:scale-95"
           >
-            {loading && <Loader className="animate-spin" size={16} />}
-            {isLogin ? 'Sign In' : 'Create Account'}
+            {isLogin ? 'Sign In & Sync' : 'Create Account'}
           </button>
         </form>
 
@@ -110,7 +101,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
             <button 
               onClick={() => { setIsLogin(!isLogin); setError(''); }}
               className="text-blue-400 hover:text-blue-300 text-sm"
-              disabled={loading}
             >
               {isLogin ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
             </button>
@@ -120,7 +110,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
                 <div className="relative flex justify-center"><span className="bg-gray-900 px-2 text-xs text-gray-500">OR</span></div>
             </div>
 
-            <button onClick={onGuest} disabled={loading} className="text-gray-500 hover:text-white text-sm flex items-center justify-center gap-2">
+            <button onClick={onGuest} className="text-gray-500 hover:text-white text-sm flex items-center justify-center gap-2">
                 Continue as Guest <ArrowRight size={14} />
             </button>
         </div>
