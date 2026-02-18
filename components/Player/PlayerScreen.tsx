@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useComms } from '../../services/comms';
 import { AuthService } from '../../services/auth';
 import { GameState, GamePhase, CommsMessage, Team, User } from '../../types';
-import { Circle, User as UserIcon, Trophy, Lock, Hash, ArrowLeft, Users, Shield, Plus, Award, LogOut } from 'lucide-react';
+import { Circle, User as UserIcon, Trophy, Lock, Hash, ArrowLeft, Users, Shield, Plus, Award, LogOut, Clock } from 'lucide-react';
 
 interface PlayerScreenProps {
   onBack?: () => void;
@@ -52,6 +52,11 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
       } else {
           setMyTeam(null);
       }
+    }
+
+    // Handle lightweight time sync to avoid laggy timer
+    if (msg.type === 'TIME_SYNC') {
+        setGameState(prev => prev ? { ...prev, timer: msg.payload.timer, timerMode: msg.payload.timerMode } : null);
     }
 
     // STATS TRACKING LOGIC
@@ -436,6 +441,22 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
                  )}
              </div>
            </div>
+        )}
+
+        {/* TIMER DISPLAY */}
+        {gameState.timer !== null && gameState.timer !== undefined && isQuestionPhase && (
+            <div className="w-full max-w-[300px] mb-8 relative">
+                 <div className="flex justify-between text-xs text-gray-400 font-bold mb-1 uppercase">
+                     <span>{gameState.timerMode === 'BUZZ' ? 'Time to Buzz' : 'Time to Answer'}</span>
+                     <span className={`${gameState.timer <= 3 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{gameState.timer}s</span>
+                 </div>
+                 <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                     <div 
+                        className={`h-full transition-all duration-1000 ease-linear ${gameState.timer <= 3 ? 'bg-red-500' : 'bg-green-500'}`}
+                        style={{ width: `${(gameState.timer / (gameState.timerMode === 'BUZZ' ? 10 : 5)) * 100}%` }}
+                     ></div>
+                 </div>
+            </div>
         )}
 
         {/* The Big Button */}

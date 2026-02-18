@@ -18,7 +18,7 @@ export interface Category {
 
 export interface GameBoard {
   id: string; 
-  ownerId?: string; // Added: Links board to a specific user account
+  ownerId?: string; // Links board to a specific user account
   title: string;
   createdAt: number; 
   categories: Category[];
@@ -45,7 +45,7 @@ export interface UserStats {
 
 export interface User {
   username: string;
-  password?: string;
+  password?: string; // Added password for verification during sync
   stats: UserStats;
   createdAt: number;
 }
@@ -90,6 +90,10 @@ export interface GameState {
   // Lockout Logic
   blockedPlayerIds: string[];
   blockedTeamIds: string[];
+
+  // Timer Logic
+  timer: number | null; // Null if inactive, Integer seconds if active
+  timerMode: 'BUZZ' | 'ANSWER' | null; // 'BUZZ' = waiting for buzzer (10s), 'ANSWER' = waiting for answer (5s)
 }
 
 // Comms
@@ -103,6 +107,6 @@ export type CommsMessage =
   | { type: 'JOIN_TEAM'; payload: { teamId: string; playerId: string } }
   | { type: 'RESULT_EVENT'; payload: { playerId: string; correct: boolean; points: number; categoryTitle: string; isDailyDouble: boolean } }
   | { type: 'GAME_OVER_SUMMARY'; payload: { winners: string[] } }
-  // New Sync Messages
+  | { type: 'TIME_SYNC'; payload: { timer: number; timerMode: 'BUZZ' | 'ANSWER' | null } }
   | { type: 'SYNC_REQUEST'; payload: null }
   | { type: 'SYNC_DATA'; payload: { user: User; boards: GameBoard[] } };

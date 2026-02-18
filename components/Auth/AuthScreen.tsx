@@ -1,35 +1,36 @@
 import React, { useState } from 'react';
 import { AuthService } from '../../services/auth';
 import { User } from '../../types';
-import { UserCircle, ArrowRight, Smartphone } from 'lucide-react';
+import { UserCircle, ArrowRight, Lock } from 'lucide-react';
 
 interface AuthScreenProps {
   onSuccess: (user: User) => void;
   onGuest: () => void;
   onBack: () => void;
-  onSync?: () => void;
+  onSync?: () => void; // Deprecated but kept for type compat if needed
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBack, onSync }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBack }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
-    if (!username.trim()) {
-      setError('Please enter a username');
+    if (!username.trim() || !password.trim()) {
+      setError('Please enter username and password');
       return;
     }
 
     try {
       let user;
       if (isLogin) {
-        user = AuthService.login(username);
+        user = AuthService.login(username, password);
       } else {
-        user = AuthService.register(username);
+        user = AuthService.register(username, password);
       }
       onSuccess(user);
     } catch (err: any) {
@@ -52,7 +53,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
           {isLogin ? 'Welcome Back' : 'Create Account'}
         </h2>
         <p className="text-gray-400 text-center mb-8 text-sm">
-          {isLogin ? 'Sign in to track your stats' : 'Start your journey to the leaderboard'}
+          {isLogin ? 'Sign in to access your boards' : 'Start your journey to the leaderboard'}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -63,9 +64,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full bg-black border border-gray-700 rounded-lg p-3 text-white focus:border-jeopardy-gold outline-none transition-colors"
-              placeholder="Enter username"
+              placeholder="Username"
               autoFocus
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase text-gray-500 mb-2">Password</label>
+            <div className="relative">
+                <Lock className="absolute left-3 top-3.5 text-gray-500" size={16} />
+                <input 
+                type="password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-black border border-gray-700 rounded-lg p-3 pl-10 text-white focus:border-jeopardy-gold outline-none transition-colors"
+                placeholder="Password (for syncing devices)"
+                />
+            </div>
           </div>
 
           {error && (
@@ -78,7 +93,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
             type="submit" 
             className="w-full bg-jeopardy-gold hover:bg-yellow-300 text-black font-bold py-3 rounded-lg transition-transform active:scale-95"
           >
-            {isLogin ? 'Sign In' : 'Create Account'}
+            {isLogin ? 'Sign In & Sync' : 'Create Account'}
           </button>
         </form>
 
@@ -98,12 +113,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
             <button onClick={onGuest} className="text-gray-500 hover:text-white text-sm flex items-center justify-center gap-2">
                 Continue as Guest <ArrowRight size={14} />
             </button>
-            
-            {onSync && (
-                <button onClick={onSync} className="text-gray-500 hover:text-white text-sm flex items-center justify-center gap-2 mt-2">
-                    <Smartphone size={14} /> Transfer Data from another Device
-                </button>
-            )}
         </div>
       </div>
     </div>

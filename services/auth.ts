@@ -28,7 +28,7 @@ const saveUsers = (users: User[]) => {
 
 export const AuthService = {
   // Sign Up
-  register: (username: string): User => {
+  register: (username: string, password?: string): User => {
     const users = getUsers();
     if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
       throw new Error('Username already exists');
@@ -36,6 +36,7 @@ export const AuthService = {
 
     const newUser: User = {
       username,
+      password, // Save password
       stats: {
         solo: createEmptyModeStats(),
         team: createEmptyModeStats(),
@@ -53,12 +54,17 @@ export const AuthService = {
   },
 
   // Login
-  login: (username: string): User => {
+  login: (username: string, password?: string): User => {
     const users = getUsers();
     const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
     
     if (!user) {
-      throw new Error('User not found');
+      throw new Error('User not found. Please register.');
+    }
+
+    // Simple password check (Client-side only)
+    if (user.password && user.password !== password) {
+        throw new Error('Incorrect password');
     }
     
     // Migration check for old user objects (if any)
@@ -73,6 +79,12 @@ export const AuthService = {
         // Attempt to migrate flat stats if they existed
         // @ts-ignore
         if (user.stats.totalScore) user.stats.solo.totalScore = user.stats.totalScore;
+    }
+
+    // If migrating an old user to add a password
+    if (!user.password && password) {
+        user.password = password;
+        saveUsers(users);
     }
 
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
