@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
@@ -42,12 +42,13 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   
   // QR Code
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
+  const [isQrExpanded, setIsQrExpanded] = useState(false);
 
   // Generate QR Code on mount
   useEffect(() => {
     const url = `${window.location.origin}?code=${lobbyCode}`;
     QRCode.toDataURL(url, { 
-        width: 256,
+        width: 512, // Increased resolution for larger display
         margin: 2,
         color: {
             dark: '#000000',
@@ -388,8 +389,14 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
           
           {/* QR Code Toggle / Footer */}
           {phase === GamePhase.LOBBY && qrCodeDataUrl && (
-              <div className="p-4 bg-white text-center border-t border-gray-700">
-                  <p className="text-black text-xs font-bold mb-2 uppercase">Scan to Join</p>
+              <div 
+                className="p-4 bg-white text-center border-t border-gray-700 cursor-pointer hover:bg-gray-100 transition-colors group"
+                onClick={() => setIsQrExpanded(true)}
+              >
+                  <div className="flex items-center justify-center gap-2 text-black text-xs font-bold mb-2 uppercase">
+                      <span>Scan to Join</span>
+                      <Maximize size={12} className="text-gray-400 group-hover:text-black" />
+                  </div>
                   <img src={qrCodeDataUrl} className="w-32 h-32 mx-auto" alt="QR Code" />
               </div>
           )}
@@ -552,6 +559,35 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
           )}
 
       </div>
+
+      {/* EXPANDED QR MODAL */}
+      {isQrExpanded && qrCodeDataUrl && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out"
+            onClick={() => setIsQrExpanded(false)}
+          >
+              <div className="bg-white p-8 rounded-3xl shadow-2xl flex flex-col items-center animate-in zoom-in-95 duration-200 cursor-default" onClick={(e) => e.stopPropagation()}>
+                  <h2 className="text-3xl font-bold text-gray-900 mb-2">JOIN GAME</h2>
+                  <p className="text-gray-500 mb-6 uppercase text-sm font-bold tracking-wider">Scan with camera</p>
+                  
+                  <img src={qrCodeDataUrl} className="w-[60vh] h-[60vh] max-w-full object-contain mb-8 border-4 border-black rounded-xl" alt="Large QR" />
+                  
+                  <div className="flex items-center gap-4 bg-gray-100 px-8 py-4 rounded-2xl border-2 border-gray-200">
+                      <div className="text-right">
+                          <p className="text-xs font-bold text-gray-400 uppercase">Lobby Code</p>
+                          <p className="text-5xl font-mono font-bold text-jeopardy-blue tracking-widest">{lobbyCode}</p>
+                      </div>
+                  </div>
+
+                  <button 
+                    onClick={() => setIsQrExpanded(false)}
+                    className="mt-8 text-gray-400 hover:text-black flex items-center gap-2 transition-colors"
+                  >
+                      <X size={20} /> Close
+                  </button>
+              </div>
+          </div>
+      )}
     </div>
   );
 };
