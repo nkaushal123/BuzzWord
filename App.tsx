@@ -11,6 +11,7 @@ import { DeviceSync } from './components/Sync/DeviceSync';
 import { DatabaseConfig } from './components/Config/DatabaseConfig';
 import { GameBoard, User } from './types';
 import { AuthService } from './services/auth';
+import { DatabaseService } from './services/db';
 
 type View = 'WELCOME' | 'AUTH' | 'STATS' | 'DASHBOARD' | 'EDITOR' | 'HOST_GAME' | 'PLAYER' | 'HELP' | 'SYNC' | 'DB_CONFIG';
 
@@ -28,6 +29,17 @@ function App() {
     
     if (savedUser) setCurrentUser(savedUser);
 
+    // Initial Database Check
+    if (!DatabaseService.isConnected()) {
+        // If not connected, force DB Config unless they are just joining a lobby (Players might not need DB if game state is purely P2P, but for stats they do)
+        // However, the user requested "store all logins and stats... basically a big database".
+        // So we should encourage DB connection.
+        // We won't block 'PLAYER' view entirely if they have a code, but for HOSTing/STATS, we need DB.
+        if (!codeParam) {
+            setView('DB_CONFIG');
+        }
+    }
+
     if (codeParam) {
       setLobbyCode(codeParam.toUpperCase());
       // If they have a code, go straight to Auth (or Player if logged in)
@@ -40,6 +52,12 @@ function App() {
   }, []);
 
   const handleRoleSelect = (role: 'HOST' | 'PLAYER' | 'EDITOR' | 'HELP' | 'DB_CONFIG') => {
+    if (!DatabaseService.isConnected() && (role === 'HOST' || role === 'EDITOR')) {
+        alert("You must connect to a database to Host or Create games.");
+        setView('DB_CONFIG');
+        return;
+    }
+
     if (role === 'HOST') {
       setView('DASHBOARD');
     } else if (role === 'EDITOR') {

@@ -1,11 +1,14 @@
 import React from 'react';
-import { Monitor, Smartphone, Edit3, HelpCircle, Database } from 'lucide-react';
+import { Monitor, Smartphone, Edit3, HelpCircle, Database, AlertCircle } from 'lucide-react';
+import { DatabaseService } from '../services/db';
 
 interface WelcomeProps {
   onSelectRole: (role: 'HOST' | 'PLAYER' | 'EDITOR' | 'HELP' | 'DB_CONFIG') => void;
 }
 
 export const Welcome: React.FC<WelcomeProps> = ({ onSelectRole }) => {
+  const isConnected = DatabaseService.isConnected();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-black text-white flex flex-col items-center justify-center p-6 relative overflow-hidden">
       {/* Background Decorative Elements */}
@@ -16,9 +19,10 @@ export const Welcome: React.FC<WelcomeProps> = ({ onSelectRole }) => {
 
       <button 
           onClick={() => onSelectRole('DB_CONFIG')}
-          className="absolute top-4 left-4 flex items-center gap-2 text-gray-500 hover:text-jeopardy-gold transition-colors z-20 text-xs uppercase font-bold"
+          className={`absolute top-4 left-4 flex items-center gap-2 transition-colors z-20 text-xs uppercase font-bold py-2 px-4 rounded-full border ${isConnected ? 'text-green-400 border-green-900 bg-green-900/20' : 'text-red-400 border-red-900 bg-red-900/20 animate-pulse'}`}
       >
-          <Database size={16} /> Config Database
+          {isConnected ? <Database size={16} /> : <AlertCircle size={16} />} 
+          {isConnected ? "DB Connected" : "Connect Database"}
       </button>
 
       <div className="z-10 text-center max-w-4xl w-full">
@@ -32,7 +36,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onSelectRole }) => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
            <button
             onClick={() => onSelectRole('EDITOR')}
-            className="group relative bg-gray-800 hover:bg-gray-700 border-2 border-gray-600 rounded-xl p-8 transition-all hover:scale-105 shadow-xl flex flex-col items-center"
+            className={`group relative bg-gray-800 hover:bg-gray-700 border-2 border-gray-600 rounded-xl p-8 transition-all hover:scale-105 shadow-xl flex flex-col items-center ${!isConnected ? 'opacity-50 grayscale' : ''}`}
           >
             <div className="bg-gray-600 p-4 rounded-full mb-4 group-hover:bg-gray-500 transition-colors">
               <Edit3 size={40} className="text-white" />
@@ -43,7 +47,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ onSelectRole }) => {
 
           <button
             onClick={() => onSelectRole('HOST')}
-            className="group relative bg-blue-800 hover:bg-blue-700 border-2 border-blue-500 rounded-xl p-8 transition-all hover:scale-105 shadow-xl flex flex-col items-center"
+            className={`group relative bg-blue-800 hover:bg-blue-700 border-2 border-blue-500 rounded-xl p-8 transition-all hover:scale-105 shadow-xl flex flex-col items-center ${!isConnected ? 'opacity-50 grayscale' : ''}`}
           >
             <div className="bg-blue-600 p-4 rounded-full mb-4 group-hover:bg-blue-500 transition-colors">
               <Monitor size={40} className="text-white" />
