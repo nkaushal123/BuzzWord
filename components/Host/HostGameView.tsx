@@ -1052,10 +1052,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
                             {/* Audio Player (Hidden Iframe) - Using Off-screen positioning to allow autoplay */}
                             {isPlayingAudio && currentQuestion.q.youtubeUrl && (
-                                <div className="fixed top-[-9999px] left-[-9999px] opacity-0 pointer-events-none">
+                                <div className="fixed top-0 left-0 w-1 h-1 opacity-0 pointer-events-none z-[-1] overflow-hidden">
                                     <iframe 
-                                        width="560" 
-                                        height="315" 
+                                        width="1" 
+                                        height="1" 
                                         src={`https://www.youtube.com/embed/${getYoutubeId(currentQuestion.q.youtubeUrl)}?autoplay=1&controls=0&disablekb=1&fs=0&modestbranding=1&rel=0`} 
                                         title="Audio Player"
                                         allow="autoplay; encrypted-media; gyroscope; picture-in-picture"
