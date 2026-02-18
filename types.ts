@@ -30,6 +30,13 @@ export interface Player {
   score: number;
 }
 
+export interface Team {
+  id: string;
+  name: string;
+  score: number;
+  members: string[]; // Array of Player IDs
+}
+
 export enum GamePhase {
   LOBBY = 'LOBBY', // Added LOBBY phase
   BOARD = 'BOARD',
@@ -48,6 +55,14 @@ export interface GameState {
   buzzLocked: boolean;
   players: Player[];
   board: GameBoard | null;
+  
+  // Teams Mode
+  isTeamsMode: boolean;
+  teams: Team[];
+  
+  // Lockout Logic (Incorrect guesses)
+  blockedPlayerIds: string[];
+  blockedTeamIds: string[];
 }
 
 // Comms
@@ -56,4 +71,6 @@ export type CommsMessage =
   | { type: 'BUZZ'; payload: { playerId: string } }
   | { type: 'HOST_SYNC'; payload: GameState }
   | { type: 'AWARD_POINTS'; payload: { playerId: string; points: number } }
-  | { type: 'RESET_BUZZER'; payload: null };
+  | { type: 'RESET_BUZZER'; payload: null }
+  | { type: 'CREATE_TEAM'; payload: { name: string; playerId: string } }
+  | { type: 'JOIN_TEAM'; payload: { teamId: string; playerId: string } };
