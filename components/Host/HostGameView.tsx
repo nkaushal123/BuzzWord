@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
+import { soundService } from '../../services/sound';
 import { Users, Lock, Unlock, Check, X, ArrowRight, Copy, LogOut, Wifi, WifiOff, Star, DollarSign, Link, Shield, Trash2, Eye, Trophy, Target, Zap, TrendingDown } from 'lucide-react';
 
 interface HostGameViewProps {
@@ -37,6 +38,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const [buzzedPlayerId, setBuzzedPlayerId] = useState<string | null>(null);
   const [buzzLocked, setBuzzLocked] = useState(true);
   
+  // UI State to prevent double clicks
+  const [isProcessing, setIsProcessing] = useState(false);
+
   // Lockout lists for incorrect guesses
   const [blockedPlayerIds, setBlockedPlayerIds] = useState<string[]>([]);
   const [blockedTeamIds, setBlockedTeamIds] = useState<string[]>([]);
@@ -61,6 +65,13 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
           playerStatsRef.current[id] = { buzzes: 0, correct: 0, wrong: 0, dailyDoubles: 0, accuracy: 0 };
       }
   };
+
+  // Play board fill sound on mount
+  useEffect(() => {
+    if (gamePhase === GamePhase.BOARD) {
+        soundService.play('BOARD_FILL');
+    }
+  }, [gamePhase]);
 
   // Use Comms with HOST role
   const { sendMessage, isConnected } = useComms(lobbyCode, 'HOST', (msg: CommsMessage) => {
@@ -108,6 +119,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         } else {
             if (blockedPlayerIds.includes(msg.payload.playerId)) return;
         }
+
+        // SFX: Play Buzz Sound
+        soundService.play('BUZZ');
 
         setBuzzedPlayerId(msg.payload.playerId);
         setBuzzLocked(true);
@@ -199,8 +213,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     setBuzzLocked(true);
     setBlockedPlayerIds([]); 
     setBlockedTeamIds([]);
+    setIsProcessing(false); // Reset processing lock
     
     if (q.isDailyDouble) {
+      soundService.play('DAILY_DOUBLE'); // SFX: Daily Double
       setDailyDoubleMode(true);
       setWager(q.points);
       setDailyDoublePlayerId(null);
@@ -220,12 +236,19 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   };
 
   const handleCorrect = () => {
-    if (!currentQuestion) return;
+    if (!currentQuestion || isProcessing) return;
+    setIsProcessing(true); // Lock buttons immediately
     
+    // SFX: Correct
+    soundService.play('CORRECT');
+
     const points = dailyDoubleMode ? wager : currentQuestion.q.points;
     const playerIdToScore = dailyDoubleMode ? dailyDoublePlayerId : buzzedPlayerId;
 
-    if (!playerIdToScore) return;
+    if (!playerIdToScore) {
+        setIsProcessing(false);
+        return;
+    }
 
     // Update Stats
     if (playerStatsRef.current[playerIdToScore]) {
@@ -261,12 +284,19 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   };
 
   const handleIncorrect = () => {
-    if (!currentQuestion) return;
+    if (!currentQuestion || isProcessing) return;
+    setIsProcessing(true); // Temporary lock
+    
+    // SFX: Wrong
+    soundService.play('WRONG');
 
     const points = dailyDoubleMode ? wager : currentQuestion.q.points;
     const playerIdToScore = dailyDoubleMode ? dailyDoublePlayerId : buzzedPlayerId;
 
-    if (!playerIdToScore) return;
+    if (!playerIdToScore) {
+        setIsProcessing(false);
+        return;
+    }
 
     // Update Stats
     if (playerStatsRef.current[playerIdToScore]) {
@@ -302,8 +332,11 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         setDailyDoubleMode(false);
         revealAnswer();
     } else {
+        // Incorrect guess in normal mode: reset buzzer and re-open for others
         setBuzzedPlayerId(null);
         setBuzzLocked(false);
+        // We unlock processing so the host can accept the next buzzer
+        setIsProcessing(false);
     }
   };
 
@@ -324,6 +357,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     setDdQuestionRevealed(false);
     setWager(0);
     setDailyDoublePlayerId(null);
+    setIsProcessing(false);
   };
 
   const copyToClipboard = () => {
@@ -707,20 +741,24 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                         </button>
                     ) : (
                         <div className="flex justify-between gap-2 animate-in fade-in slide-in-from-bottom-2">
-                            <button 
-                                onClick={handleCorrect}
-                                disabled={!dailyDoublePlayerId}
-                                className="flex-1 py-3 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg"
-                            >
-                                <Check className="mr-1" size={18} /> Correct
-                            </button>
-                            <button 
-                                onClick={handleIncorrect}
-                                disabled={!dailyDoublePlayerId}
-                                className="flex-1 py-3 bg-red-600 hover:bg-red-500 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg"
-                            >
-                                <X className="mr-1" size={18} /> Wrong
-                            </button>
+                            {!isProcessing && !showAnswer && (
+                                <>
+                                    <button 
+                                        onClick={handleCorrect}
+                                        disabled={!dailyDoublePlayerId || isProcessing}
+                                        className="flex-1 py-3 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg"
+                                    >
+                                        <Check className="mr-1" size={18} /> Correct
+                                    </button>
+                                    <button 
+                                        onClick={handleIncorrect}
+                                        disabled={!dailyDoublePlayerId || isProcessing}
+                                        className="flex-1 py-3 bg-red-600 hover:bg-red-500 disabled:bg-gray-700 disabled:text-gray-500 rounded font-bold flex items-center justify-center shadow-lg"
+                                    >
+                                        <X className="mr-1" size={18} /> Wrong
+                                    </button>
+                                </>
+                            )}
                         </div>
                     )}
                 </div>
@@ -747,7 +785,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                         </div>
                     )}
 
-                    {buzzedPlayerId && (
+                    {buzzedPlayerId && !showAnswer && (
                     <div className="space-y-2 animate-in slide-in-from-bottom duration-200">
                         <div className="text-center bg-gray-900 p-2 rounded border border-gray-700 mb-2">
                             <span className="text-gray-400 text-xs uppercase">Buzzed In:</span>
@@ -763,13 +801,15 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                         <div className="flex gap-2">
                             <button 
                             onClick={handleCorrect}
-                            className="flex-1 py-4 bg-green-600 hover:bg-green-500 rounded font-bold flex items-center justify-center shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all"
+                            disabled={isProcessing}
+                            className="flex-1 py-4 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 rounded font-bold flex items-center justify-center shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all"
                             >
                             <Check className="mr-1" size={24} /> CORRECT
                             </button>
                             <button 
                             onClick={handleIncorrect}
-                            className="flex-1 py-4 bg-red-600 hover:bg-red-500 rounded font-bold flex items-center justify-center shadow-lg border-b-4 border-red-800 active:border-b-0 active:translate-y-1 transition-all"
+                            disabled={isProcessing}
+                            className="flex-1 py-4 bg-red-600 hover:bg-red-500 disabled:bg-gray-700 rounded font-bold flex items-center justify-center shadow-lg border-b-4 border-red-800 active:border-b-0 active:translate-y-1 transition-all"
                             >
                             <X className="mr-1" size={24} /> WRONG
                             </button>
@@ -780,7 +820,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                     {showAnswer && (
                     <button 
                         onClick={closeQuestion}
-                        className="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded font-bold flex items-center justify-center shadow-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all"
+                        className="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded font-bold flex items-center justify-center shadow-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all animate-in slide-in-from-bottom"
                     >
                         Back to Board <ArrowRight className="ml-2"/>
                     </button>
