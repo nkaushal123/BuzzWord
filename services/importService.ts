@@ -191,8 +191,19 @@ export const importFromHTMLFile = async (file: File): Promise<GameBoard> => {
         reader.onload = (e) => {
             const content = e.target?.result as string;
             try {
-                const board = parseJeopardyHTML(content);
-                resolve(board);
+                // Check if it's our native JSON format
+                if (file.name.toLowerCase().endsWith('.json')) {
+                    const board = JSON.parse(content);
+                    if (!board.title || !board.categories) {
+                        throw new Error("Invalid BuzzWord JSON file.");
+                    }
+                    // Validate/Fix structure if needed
+                    resolve(board);
+                } else {
+                    // Assume HTML
+                    const board = parseJeopardyHTML(content);
+                    resolve(board);
+                }
             } catch (err: any) {
                 reject(new Error(err.message || "Failed to parse file"));
             }

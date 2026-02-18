@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { AuthService } from '../../services/auth';
 import { User } from '../../types';
-import { UserCircle, ArrowRight, Trophy } from 'lucide-react';
+import { UserCircle, ArrowRight, Smartphone } from 'lucide-react';
 
 interface AuthScreenProps {
   onSuccess: (user: User) => void;
   onGuest: () => void;
   onBack: () => void;
+  onSync?: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBack }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBack, onSync }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
@@ -97,6 +98,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onGuest, onBa
             <button onClick={onGuest} className="text-gray-500 hover:text-white text-sm flex items-center justify-center gap-2">
                 Continue as Guest <ArrowRight size={14} />
             </button>
+            
+            {onSync && (
+                <button onClick={onSync} className="text-gray-500 hover:text-white text-sm flex items-center justify-center gap-2 mt-2">
+                    <Smartphone size={14} /> Transfer Data from another Device
+                </button>
+            )}
         </div>
       </div>
     </div>

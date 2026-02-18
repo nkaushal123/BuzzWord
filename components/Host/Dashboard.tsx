@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { GameBoard } from '../../types';
 import { getBoards, createEmptyBoard, deleteBoard, saveBoard } from '../../services/storage';
 import { importFromJeopardyLabs, importFromHTMLFile } from '../../services/importService';
-import { Play, Plus, Trash2, Edit, Download, X, Loader, FileUp, Globe } from 'lucide-react';
+import { AuthService } from '../../services/auth';
+import { Play, Plus, Trash2, Edit, Download, X, Loader, FileUp, Globe, Share, User as UserIcon } from 'lucide-react';
 
 interface DashboardProps {
   onPlay: (board: GameBoard) => void;
@@ -17,14 +18,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState('');
   const [activeTab, setActiveTab] = useState<'FILE' | 'URL'>('FILE');
+  
+  const currentUser = AuthService.getCurrentUser();
 
   useEffect(() => {
-    setBoards(getBoards());
-  }, []);
+    // Load boards specific to this user (or guest boards if null)
+    setBoards(getBoards(currentUser?.username));
+  }, [currentUser]);
 
   const handleCreate = (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
-    onEdit(createEmptyBoard());
+    // Create board attached to current user
+    onEdit(createEmptyBoard(currentUser?.username));
   };
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
@@ -32,8 +37,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
     e.stopPropagation();
     if (window.confirm("Are you sure you want to delete this game?")) {
       deleteBoard(id);
-      setBoards(getBoards());
+      setBoards(getBoards(currentUser?.username));
     }
+  };
+
+  const handleExport = (board: GameBoard, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(board));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", `buzzword-${board.title.replace(/\s+/g, '-').toLowerCase()}.json`);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
   };
 
   const handleUrlSubmit = async (e: React.FormEvent) => {
@@ -43,8 +59,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
 
       try {
           const newBoard = await importFromJeopardyLabs(importUrl);
+          // Assign ownership to current user
+          if (currentUser) newBoard.ownerId = currentUser.username;
+          
           saveBoard(newBoard);
-          setBoards(getBoards());
+          setBoards(getBoards(currentUser?.username));
           setShowImportModal(false);
           setImportUrl('');
       } catch (err: any) {
@@ -62,12 +81,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
       setIsImporting(true);
 
       try {
+          // This function now handles both JSON and HTML
           const newBoard = await importFromHTMLFile(file);
+          // Assign ownership
+          if (currentUser) newBoard.ownerId = currentUser.username;
+
           saveBoard(newBoard);
-          setBoards(getBoards());
+          setBoards(getBoards(currentUser?.username));
           setShowImportModal(false);
       } catch (err: any) {
-          setImportError("Could not parse file. Make sure it is a valid HTML file from JeopardyLabs.");
+          setImportError("Could not parse file. Make sure it is a valid HTML (JeopardyLabs) or JSON (BuzzWord) file.");
       } finally {
           setIsImporting(false);
           // Reset input
@@ -78,33 +101,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-black text-white p-6">
       <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-12">
+        <div className="flex items-center justify-between mb-8">
           <button onClick={onBack} className="text-blue-300 hover:text-white transition-colors">
             &larr; Back to Home
           </button>
-          <h1 className="text-4xl font-display text-jeopardy-gold">My Games</h1>
-          <div className="flex gap-2">
-            <button
-                onClick={() => setShowImportModal(true)}
-                className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 px-4 py-3 rounded-xl font-bold shadow-lg transition-transform hover:scale-105"
-            >
-                <Download className="w-5 h-5" />
-                <span>Import</span>
-            </button>
-            <button
-                onClick={handleCreate}
-                className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-bold shadow-lg transition-transform hover:scale-105"
-            >
-                <Plus className="w-5 h-5" />
-                <span>Create New Game</span>
-            </button>
-          </div>
+          
+          {currentUser && (
+              <div className="flex items-center gap-2 text-jeopardy-gold bg-gray-900 px-4 py-2 rounded-full border border-gray-700">
+                  <UserIcon size={16} />
+                  <span className="font-bold">{currentUser.username}'s Library</span>
+              </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between mb-12">
+            <h1 className="text-4xl font-display text-white">My Games</h1>
+            <div className="flex gap-2">
+                <button
+                    onClick={() => setShowImportModal(true)}
+                    className="flex items-center space-x-2 bg-gray-700 hover:bg-gray-600 px-4 py-3 rounded-xl font-bold shadow-lg transition-transform hover:scale-105"
+                >
+                    <Download className="w-5 h-5" />
+                    <span>Import</span>
+                </button>
+                <button
+                    onClick={handleCreate}
+                    className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-bold shadow-lg transition-transform hover:scale-105"
+                >
+                    <Plus className="w-5 h-5" />
+                    <span>Create New Game</span>
+                </button>
+            </div>
         </div>
 
         {boards.length === 0 ? (
           <div className="text-center py-20 bg-white/5 rounded-2xl border border-white/10">
             <h3 className="text-2xl font-bold text-gray-400 mb-4">No games yet</h3>
-            <p className="text-gray-500 mb-8">Create your first trivia board to get started!</p>
+            <p className="text-gray-500 mb-8">
+                {currentUser ? "You haven't created any games on this account yet." : "Create your first trivia board to get started!"}
+            </p>
             <button
               onClick={handleCreate}
               className="px-8 py-4 bg-jeopardy-gold text-blue-900 font-bold rounded-lg hover:bg-yellow-300 transition-colors"
@@ -124,13 +159,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
                     Created: {new Date(board.createdAt).toLocaleDateString()}
                   </p>
                   
-                  <div className="flex space-x-3">
+                  <div className="flex space-x-2">
                     <button
                       onClick={() => onPlay(board)}
                       className="flex-1 flex items-center justify-center space-x-2 bg-green-600 hover:bg-green-500 py-3 rounded-lg font-bold transition-colors"
                     >
                       <Play className="w-4 h-4" />
                       <span>Host</span>
+                    </button>
+                    
+                    <button
+                      onClick={(e) => handleExport(board, e)}
+                      className="p-3 bg-gray-700 hover:bg-blue-600 rounded-lg transition-colors text-gray-300 hover:text-white"
+                      title="Export/Download"
+                    >
+                      <Share className="w-4 h-4" />
                     </button>
                     
                     <button
@@ -169,7 +212,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
                   
                   <h2 className="text-2xl font-bold mb-2 text-jeopardy-gold">Import Board</h2>
                   <p className="text-gray-400 mb-6 text-sm">
-                      Get a board from JeopardyLabs.com
+                      Supports BuzzWord JSON and JeopardyLabs HTML
                   </p>
 
                   {/* Tabs */}
@@ -178,13 +221,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
                       onClick={() => setActiveTab('FILE')}
                       className={`flex-1 pb-3 text-sm font-bold flex items-center justify-center gap-2 ${activeTab === 'FILE' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-500 hover:text-white'}`}
                     >
-                      <FileUp size={16} /> Upload HTML File
+                      <FileUp size={16} /> Upload File
                     </button>
                     <button 
                       onClick={() => setActiveTab('URL')}
                       className={`flex-1 pb-3 text-sm font-bold flex items-center justify-center gap-2 ${activeTab === 'URL' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-500 hover:text-white'}`}
                     >
-                      <Globe size={16} /> Use URL
+                      <Globe size={16} /> JeopardyLabs URL
                     </button>
                   </div>
 
@@ -200,19 +243,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onPlay, onEdit, onBack }) 
                                 <>
                                     <FileUp className="w-12 h-12 text-gray-500 mx-auto mb-3" />
                                     <p className="text-gray-300 font-bold mb-1">Click to select file</p>
-                                    <p className="text-gray-500 text-xs">Supports .html files downloaded from JeopardyLabs</p>
+                                    <p className="text-gray-500 text-xs">Supports .json or .html</p>
                                     <input 
                                         type="file" 
-                                        accept=".html,.htm"
+                                        accept=".html,.htm,.json"
                                         onChange={handleFileUpload}
                                         className="absolute inset-0 opacity-0 cursor-pointer"
                                     />
                                 </>
                              )}
                         </div>
-                        <p className="text-xs text-gray-500 text-center">
-                            Tip: On JeopardyLabs, click "Download" or just "Save Page As..." in your browser.
-                        </p>
                      </div>
                   ) : (
                     <form onSubmit={handleUrlSubmit}>

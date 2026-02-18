@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { AuthService } from '../../services/auth';
 import { User, ModeStats } from '../../types';
-import { ArrowLeft, Trophy, Target, Award, Hash, Zap, Users, Shield, Star, DollarSign } from 'lucide-react';
+import { ArrowLeft, Trophy, Target, Award, Hash, Zap, Users, Shield, Star, DollarSign, Smartphone } from 'lucide-react';
 
 interface StatsScreenProps {
   onBack: () => void;
+  onSync: () => void;
 }
 
-export const StatsScreen: React.FC<StatsScreenProps> = ({ onBack }) => {
+export const StatsScreen: React.FC<StatsScreenProps> = ({ onBack, onSync }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [leaderboard, setLeaderboard] = useState<User[]>([]);
   const [view, setView] = useState<'ME' | 'GLOBAL'>('ME');
@@ -105,7 +106,7 @@ export const StatsScreen: React.FC<StatsScreenProps> = ({ onBack }) => {
           <div>
             {currentUser ? (
               <>
-                <div className="text-center mb-10">
+                <div className="text-center mb-10 relative">
                    <div className="inline-block p-4 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 mb-4 shadow-xl">
                       <Trophy size={48} className="text-white" />
                    </div>
@@ -113,6 +114,13 @@ export const StatsScreen: React.FC<StatsScreenProps> = ({ onBack }) => {
                    <p className="text-gray-400 text-sm mt-1">
                        Member since {new Date(currentUser.createdAt).toLocaleDateString()}
                    </p>
+                   
+                   <button 
+                      onClick={onSync}
+                      className="absolute top-0 right-0 md:static md:mt-4 bg-gray-800 hover:bg-gray-700 text-xs md:text-sm px-3 py-2 rounded-full border border-gray-600 flex items-center gap-2 transition-colors mx-auto"
+                   >
+                       <Smartphone size={14} /> Sync Devices
+                   </button>
                 </div>
                 
                 {/* Mode Selector */}

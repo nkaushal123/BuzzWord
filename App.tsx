@@ -7,10 +7,11 @@ import { PlayerScreen } from './components/Player/PlayerScreen';
 import { AuthScreen } from './components/Auth/AuthScreen';
 import { StatsScreen } from './components/Stats/StatsScreen';
 import { Help } from './components/Help';
+import { DeviceSync } from './components/Sync/DeviceSync';
 import { GameBoard, User } from './types';
 import { AuthService } from './services/auth';
 
-type View = 'WELCOME' | 'AUTH' | 'STATS' | 'DASHBOARD' | 'EDITOR' | 'HOST_GAME' | 'PLAYER' | 'HELP';
+type View = 'WELCOME' | 'AUTH' | 'STATS' | 'DASHBOARD' | 'EDITOR' | 'HOST_GAME' | 'PLAYER' | 'HELP' | 'SYNC';
 
 function App() {
   const [view, setView] = useState<View>('WELCOME');
@@ -115,12 +116,28 @@ function App() {
                     setView('WELCOME');
                 }
             }}
+            onSync={() => setView('SYNC')} 
             onBack={() => setView('WELCOME')}
           />
       )}
 
       {view === 'STATS' && (
-          <StatsScreen onBack={() => setView('WELCOME')} />
+          <StatsScreen 
+            onBack={() => setView('WELCOME')} 
+            onSync={() => setView('SYNC')}
+          />
+      )}
+      
+      {view === 'SYNC' && (
+          <DeviceSync 
+            onBack={() => setView('STATS')} 
+            onSuccess={() => {
+                // Reload user from storage as it changed
+                const updatedUser = AuthService.getCurrentUser();
+                setCurrentUser(updatedUser);
+                setView('WELCOME');
+            }}
+          />
       )}
       
       {view === 'HELP' && <Help onBack={() => setView('WELCOME')} />}

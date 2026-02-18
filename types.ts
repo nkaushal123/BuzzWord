@@ -17,9 +17,10 @@ export interface Category {
 }
 
 export interface GameBoard {
-  id: string; // Added for persistence
+  id: string; 
+  ownerId?: string; // Added: Links board to a specific user account
   title: string;
-  createdAt: number; // Added for sorting
+  createdAt: number; 
   categories: Category[];
 }
 
@@ -100,6 +101,8 @@ export type CommsMessage =
   | { type: 'RESET_BUZZER'; payload: null }
   | { type: 'CREATE_TEAM'; payload: { name: string; playerId: string } }
   | { type: 'JOIN_TEAM'; payload: { teamId: string; playerId: string } }
-  // Updated Result Event with Category info
   | { type: 'RESULT_EVENT'; payload: { playerId: string; correct: boolean; points: number; categoryTitle: string; isDailyDouble: boolean } }
-  | { type: 'GAME_OVER_SUMMARY'; payload: { winners: string[] } };
+  | { type: 'GAME_OVER_SUMMARY'; payload: { winners: string[] } }
+  // New Sync Messages
+  | { type: 'SYNC_REQUEST'; payload: null }
+  | { type: 'SYNC_DATA'; payload: { user: User; boards: GameBoard[] } };
