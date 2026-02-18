@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Peer, DataConnection } from 'peerjs';
 import { CommsMessage } from '../types';
 
@@ -14,6 +14,12 @@ export const useComms = (
   const connectionsRef = useRef<DataConnection[]>([]); // For Host: list of players
   const hostConnRef = useRef<DataConnection | null>(null); // For Player: connection to host
   const [isConnected, setIsConnected] = useState(false);
+
+  // 1. Store the latest onMessage handler in a ref to avoid stale closures
+  const onMessageRef = useRef(onMessage);
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  });
 
   useEffect(() => {
     if (!lobbyCode) return;
@@ -43,7 +49,10 @@ export const useComms = (
         });
 
         conn.on('data', (data: any) => {
-          onMessage(data as CommsMessage);
+          // 2. Use the ref to call the latest handler
+          if (onMessageRef.current) {
+            onMessageRef.current(data as CommsMessage);
+          }
         });
 
         conn.on('close', () => {
@@ -63,11 +72,17 @@ export const useComms = (
         console.log("Player connecting...", conn.peer);
         
         conn.on('open', () => {
-          connectionsRef.current.push(conn);
+          // Avoid duplicate connections in the list
+          if (!connectionsRef.current.find(c => c.peer === conn.peer)) {
+             connectionsRef.current.push(conn);
+          }
         });
 
         conn.on('data', (data: any) => {
-          onMessage(data as CommsMessage);
+          // 2. Use the ref to call the latest handler
+          if (onMessageRef.current) {
+            onMessageRef.current(data as CommsMessage);
+          }
         });
 
         conn.on('close', () => {
@@ -97,9 +112,10 @@ export const useComms = (
       peerRef.current = null;
       setIsConnected(false);
     };
-  }, [lobbyCode, role]); // Removed onMessage from dep array to avoid reconnect loops
+  }, [lobbyCode, role]); 
 
-  const sendMessage = (msg: CommsMessage) => {
+  // Stable sendMessage function
+  const sendMessage = useCallback((msg: CommsMessage) => {
     if (role === 'HOST') {
       // Broadcast to all
       connectionsRef.current.forEach(conn => {
@@ -113,7 +129,7 @@ export const useComms = (
           console.warn("Cannot send, not connected to host");
       }
     }
-  };
+  }, [role]);
 
   return { sendMessage, isConnected };
 };

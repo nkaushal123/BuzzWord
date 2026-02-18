@@ -54,6 +54,42 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   // New phase state for the lobby "waiting room"
   const [gamePhase, setGamePhase] = useState<GamePhase>(GamePhase.LOBBY);
 
+  // Use Comms with HOST role
+  // Defined BEFORE broadcastState so we can use sendMessage inside it
+  const { sendMessage, isConnected } = useComms(lobbyCode, 'HOST', (msg: CommsMessage) => {
+    if (msg.type === 'PLAYER_JOIN') {
+      setPlayers(prev => {
+        if (prev.find(p => p.id === msg.payload.id)) return prev;
+        const newPlayers = [...prev, { id: msg.payload.id, name: msg.payload.name, score: 0 }];
+        // Note: We do NOT broadcast here manually anymore. 
+        // The useEffect below will detect 'players' changing and broadcast the new state automatically.
+        return newPlayers;
+      });
+    }
+
+    if (msg.type === 'BUZZ') {
+      if (currentQuestion && !buzzLocked && !buzzedPlayerId && !dailyDoubleMode) {
+        setBuzzedPlayerId(msg.payload.playerId);
+        setBuzzLocked(true);
+        // Force immediate sync for buzzes (latency critical)
+        sendMessage({
+           type: 'HOST_SYNC',
+           payload: {
+             lobbyCode,
+             phase: GamePhase.QUESTION,
+             currentQuestionId: currentQuestion.q.id,
+             currentCategoryId: currentQuestion.catId,
+             answeredQuestions,
+             buzzedPlayerId: msg.payload.playerId,
+             buzzLocked: true,
+             players,
+             board: null
+           }
+        });
+      }
+    }
+  });
+
   // Helper to broadcast state to all players
   const broadcastState = useCallback((
     overridePlayers?: Player[], 
@@ -74,62 +110,14 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       board: null
     };
     sendMessage({ type: 'HOST_SYNC', payload: state });
-  }, [players, answeredQuestions, currentQuestion, buzzedPlayerId, buzzLocked, showAnswer, gamePhase, lobbyCode]);
-
-  // Use Comms with HOST role
-  const { sendMessage, isConnected } = useComms(lobbyCode, 'HOST', (msg: CommsMessage) => {
-    if (msg.type === 'PLAYER_JOIN') {
-      setPlayers(prev => {
-        if (prev.find(p => p.id === msg.payload.id)) return prev;
-        const newPlayers = [...prev, { id: msg.payload.id, name: msg.payload.name, score: 0 }];
-        // Broadcast immediately for new joiner
-        setTimeout(() => {
-            const state: GameState = {
-                lobbyCode,
-                phase: gamePhase,
-                currentQuestionId: currentQuestion?.q.id || null,
-                currentCategoryId: currentQuestion?.catId || null,
-                answeredQuestions,
-                buzzedPlayerId,
-                buzzLocked,
-                players: newPlayers,
-                board 
-            };
-            sendMessage({ type: 'HOST_SYNC', payload: state });
-        }, 500);
-        return newPlayers;
-      });
-    }
-
-    if (msg.type === 'BUZZ') {
-      if (currentQuestion && !buzzLocked && !buzzedPlayerId && !dailyDoubleMode) {
-        setBuzzedPlayerId(msg.payload.playerId);
-        setBuzzLocked(true);
-        // Force immediate sync
-        sendMessage({
-           type: 'HOST_SYNC',
-           payload: {
-             lobbyCode,
-             phase: GamePhase.QUESTION,
-             currentQuestionId: currentQuestion.q.id,
-             currentCategoryId: currentQuestion.catId,
-             answeredQuestions,
-             buzzedPlayerId: msg.payload.playerId,
-             buzzLocked: true,
-             players,
-             board: null
-           }
-        });
-      }
-    }
-  });
+  }, [players, answeredQuestions, currentQuestion, buzzedPlayerId, buzzLocked, showAnswer, gamePhase, lobbyCode, sendMessage]);
 
   // Keep state synced
   useEffect(() => {
     if(isConnected) {
         broadcastState();
     }
-  }, [players, buzzedPlayerId, buzzLocked, showAnswer, currentQuestion, answeredQuestions, gamePhase, dailyDoubleMode, broadcastState, isConnected]);
+  }, [broadcastState, isConnected]);
 
   // Actions
   const startGame = () => {
