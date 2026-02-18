@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
+import { GoogleGenAI, LiveServerMessage, FunctionDeclaration, Blob, Modality } from "@google/genai";
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal, Mic, MicOff, Sparkles } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
@@ -27,6 +28,30 @@ const ScoreDisplay: React.FC<{ score: number; className?: string }> = ({ score, 
         </span>
     );
 };
+
+// --- AUDIO HELPERS FOR GEMINI LIVE ---
+function encode(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function createBlob(data: Float32Array): Blob {
+  const l = data.length;
+  const int16 = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    // Clamp values to [-1, 1] range to prevent overflow artifacts
+    const s = Math.max(-1, Math.min(1, data[i]));
+    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+  return {
+    data: encode(new Uint8Array(int16.buffer)),
+    mimeType: 'audio/pcm;rate=16000',
+  };
+}
 
 export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, onExit }) => {
   // Game State
@@ -64,13 +89,21 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   // UI State
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [isQrExpanded, setIsQrExpanded] = useState(false);
-  const [showDetailedStats, setShowDetailedStats] = useState(false); // Toggle for Game Over screen
+  const [showDetailedStats, setShowDetailedStats] = useState(false); 
+
+  // --- AI LISTENING STATE ---
+  const [isAiListening, setIsAiListening] = useState(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const sessionPromiseRef = useRef<Promise<any> | null>(null); // To store session promise for cleanup
 
   // Generate QR Code on mount
   useEffect(() => {
     const url = `${window.location.origin}?code=${lobbyCode}`;
     QRCode.toDataURL(url, { 
-        width: 512, // Increased resolution for larger display
+        width: 512, 
         margin: 2,
         color: {
             dark: '#000000',
@@ -78,6 +111,13 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
         }
     }).then(setQrCodeDataUrl);
   }, [lobbyCode]);
+
+  // Clean up AI on unmount or when question changes
+  useEffect(() => {
+      return () => {
+          stopAiListening();
+      }
+  }, []);
 
   // Handle Timer Tick
   useEffect(() => {
@@ -104,6 +144,18 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       }
   }, [timer, timerMode]);
 
+  // --- AUTO START LISTENING EFFECT ---
+  useEffect(() => {
+    // Only auto-start if:
+    // 1. We are in Question Phase
+    // 2. We have a question loaded
+    // 3. Buzzers are still locked (meaning we haven't opened them yet)
+    // 4. We aren't already listening
+    if (phase === GamePhase.QUESTION && currentQuestion && buzzLocked && !isAiListening) {
+        startAiListening();
+    }
+  }, [phase, currentQuestion, buzzLocked]);
+
   const { sendMessage } = useComms(lobbyCode, 'HOST', (msg: CommsMessage) => {
     if (msg.type === 'PLAYER_JOIN') {
       setPlayers(prev => {
@@ -127,6 +179,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
             setBuzzedPlayerId(msg.payload.playerId);
             setBuzzLocked(true);
             soundService.play('BUZZ');
+            stopAiListening(); // Stop AI if someone buzzes (just in case)
             
             // TIMER: Switch to 5 second answer timer
             setTimerMode('ANSWER');
@@ -197,6 +250,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const handleEndGame = () => {
       if (window.confirm("Are you sure you want to end the game?")) {
           setPhase(GamePhase.GAME_OVER);
+          stopAiListening();
           
           // Calculate winners
           const participants = isTeamsMode ? teams : players;
@@ -212,6 +266,10 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const handleQuestionSelect = (catId: string, q: Question) => {
     if (answeredQuestions.includes(q.id)) return;
+    
+    // Stop any previous instance first to ensure clean state
+    stopAiListening();
+    
     setCurrentQuestion({ catId, q });
     setPhase(GamePhase.QUESTION);
     setBuzzedPlayerId(null);
@@ -224,12 +282,130 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     if (q.isDailyDouble) {
         soundService.play('DAILY_DOUBLE');
     }
+    // Auto-start is handled by useEffect
+  };
+
+  // --- AI LISTENING FUNCTIONS ---
+
+  const stopAiListening = () => {
+      setIsAiListening(false);
+      
+      // Cleanup Audio
+      if (processorRef.current) {
+          processorRef.current.disconnect();
+          processorRef.current = null;
+      }
+      if (sourceRef.current) {
+          sourceRef.current.disconnect();
+          sourceRef.current = null;
+      }
+      if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+      }
+      if (audioContextRef.current) {
+          audioContextRef.current.close();
+          audioContextRef.current = null;
+      }
+      
+      // Close session if it exists
+      if (sessionPromiseRef.current) {
+          sessionPromiseRef.current
+            .then(session => session.close())
+            .catch(err => console.debug("Session close error", err));
+          sessionPromiseRef.current = null;
+      }
+  };
+
+  const startAiListening = async () => {
+    if (!currentQuestion) return;
+    
+    // Stop any existing session first
+    stopAiListening();
+    setIsAiListening(true);
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+            sampleRate: 16000,
+            channelCount: 1,
+            echoCancellation: true
+        }});
+        streamRef.current = stream;
+        
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        audioContextRef.current = audioContext;
+        
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        
+        const unlockTool: FunctionDeclaration = {
+            name: 'unlockBuzzers',
+            description: 'Unlocks the game buzzers to allow players to answer.',
+        };
+
+        const sessionPromise = ai.live.connect({
+            model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+            config: {
+                responseModalities: [Modality.AUDIO],
+                tools: [{ functionDeclarations: [unlockTool] }],
+                // Simplified, urgent prompt for lower latency
+                systemInstruction: `You are a Jeopardy host assistant. The host is reading this question: "${currentQuestion.q.question}". Listen to the audio. When the host finishes reading the text, immediately call the "unlockBuzzers" function. Do not wait for an answer.`,
+            },
+            callbacks: {
+                onopen: () => {
+                    if (!audioContextRef.current || !streamRef.current) return;
+                    
+                    const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+                    sourceRef.current = source;
+                    
+                    // Reduced buffer size (4096 -> 2048) for lower latency (~128ms at 16kHz)
+                    const processor = audioContextRef.current.createScriptProcessor(2048, 1, 1);
+                    processorRef.current = processor;
+                    
+                    processor.onaudioprocess = (e) => {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const pcmBlob = createBlob(inputData);
+                        sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
+                    };
+                    
+                    source.connect(processor);
+                    processor.connect(audioContextRef.current.destination);
+                },
+                onmessage: (msg: LiveServerMessage) => {
+                    if (msg.toolCall) {
+                        for (const fc of msg.toolCall.functionCalls) {
+                            if (fc.name === 'unlockBuzzers') {
+                                handleUnlockBuzzers();
+                                stopAiListening(); // Auto-stop after triggering
+                            }
+                        }
+                    }
+                },
+                onclose: () => { 
+                    setIsAiListening(false); 
+                },
+                onerror: (err) => { 
+                    console.error("Gemini Live Error:", err); 
+                    stopAiListening(); 
+                }
+            }
+        });
+        
+        sessionPromiseRef.current = sessionPromise;
+        
+    } catch (e) {
+        console.error("AI Init failed", e);
+        setIsAiListening(false);
+        // Don't alert on auto-start failure to avoid spamming user if permission denied
+        console.warn("Could not start AI listening. Please check microphone permissions.");
+    }
   };
 
   const handleUnlockBuzzers = () => {
     setBuzzLocked(false);
     setTimerMode('BUZZ');
     setTimer(10);
+    // Ensure AI is off if manually triggered
+    stopAiListening();
   };
 
   const setUndoAction = (action: typeof lastAction) => {
@@ -275,6 +451,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const handleCorrect = () => {
     if (!currentQuestion || !buzzedPlayerId) return;
+    stopAiListening();
 
     soundService.play('CORRECT');
     const points = currentQuestion.q.points;
@@ -334,6 +511,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const handleWrong = () => {
     if (!currentQuestion || !buzzedPlayerId) return;
+    stopAiListening();
 
     soundService.play('WRONG');
     const points = currentQuestion.q.points;
@@ -393,6 +571,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   const handleSkip = () => {
     if (!currentQuestion) return;
+    stopAiListening();
     setAnsweredQuestions(prev => [...prev, currentQuestion.q.id]);
     setPhase(GamePhase.BOARD);
     setCurrentQuestion(null);
@@ -846,6 +1025,13 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                            <h2 className="text-4xl md:text-6xl font-display uppercase leading-tight text-white drop-shadow-md">
                                {currentQuestion.q.question}
                            </h2>
+
+                            {/* AI Listening Indicator */}
+                            {isAiListening && (
+                                <div className="absolute top-4 right-4 flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse shadow-lg">
+                                    <Mic size={14} /> Listening for end of question...
+                                </div>
+                            )}
                        </div>
                        
                        {/* Timer & Buzzer State */}
@@ -888,14 +1074,26 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                                </button>
                            </div>
 
-                           {/* Center: Open Buzzers (Space) */}
-                           <button 
-                               onClick={handleUnlockBuzzers} 
-                               disabled={!buzzLocked || !!buzzedPlayerId}
-                               className="col-span-1 bg-jeopardy-gold hover:bg-yellow-300 disabled:opacity-30 disabled:cursor-not-allowed text-black font-bold rounded-xl text-xl shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95"
-                           >
-                               <Unlock size={24} /> OPEN
-                           </button>
+                           {/* Center: Open Buzzers & AI Mic */}
+                           <div className="col-span-1 flex gap-2">
+                                <button 
+                                    onClick={handleUnlockBuzzers} 
+                                    disabled={!buzzLocked || !!buzzedPlayerId}
+                                    className="flex-1 bg-jeopardy-gold hover:bg-yellow-300 disabled:opacity-30 disabled:cursor-not-allowed text-black font-bold rounded-xl text-xl shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95"
+                                >
+                                    <Unlock size={24} /> OPEN
+                                </button>
+                                
+                                {/* Magic Mic Button - now acts as a Toggle/Stop */}
+                                <button
+                                    onClick={isAiListening ? stopAiListening : startAiListening}
+                                    disabled={!buzzLocked || !!buzzedPlayerId}
+                                    className={`w-16 rounded-xl flex items-center justify-center transition-all ${isAiListening ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 hover:bg-gray-700 text-jeopardy-gold disabled:opacity-30'}`}
+                                    title={isAiListening ? "Stop Auto-Listening" : "Start Auto-Listening (Manual)"}
+                                >
+                                    {isAiListening ? <MicOff size={24} /> : <Sparkles size={24} />}
+                                </button>
+                           </div>
 
                            {/* Right: Scoring */}
                            <div className="flex gap-2">

@@ -1,5 +1,7 @@
 {
   "name": "BuzzWord",
   "description": "A Jeopardy-style trivia game with a real-time multiplayer buzzer system. Create your own boards and play with friends using a simple lobby code.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }
