@@ -156,7 +156,8 @@ function App() {
             onBack={() => {
                 setLobbyCode(''); 
                 setView('WELCOME');
-            }} 
+            }}
+            onViewStats={() => setView('STATS')}
         />
       )}
     </div>

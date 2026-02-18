@@ -2,15 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useComms } from '../../services/comms';
 import { AuthService } from '../../services/auth';
 import { GameState, GamePhase, CommsMessage, Team, User } from '../../types';
-import { Circle, User as UserIcon, Trophy, Lock, Hash, ArrowLeft, Users, Shield, Plus, Award } from 'lucide-react';
+import { Circle, User as UserIcon, Trophy, Lock, Hash, ArrowLeft, Users, Shield, Plus, Award, LogOut } from 'lucide-react';
 
 interface PlayerScreenProps {
   onBack?: () => void;
+  onViewStats?: () => void;
   initialCode?: string;
   user?: User | null; // Pass authenticated user
 }
 
-export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode, user }) => {
+export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats, initialCode, user }) => {
   const [name, setName] = useState(user?.username || '');
   const [lobbyCodeInput, setLobbyCodeInput] = useState(initialCode || '');
   const [activeLobbyCode, setActiveLobbyCode] = useState<string>('');
@@ -21,6 +22,10 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode,
   const [myScore, setMyScore] = useState(0);
   const [myTeam, setMyTeam] = useState<Team | null>(null);
   
+  // Game End State
+  const [gameEnded, setGameEnded] = useState(false);
+  const [amIWinner, setAmIWinner] = useState(false);
+
   // Local Stats Tracking Session (to accumulate before saving)
   const sessionStats = useRef({
     pointsEarned: 0,
@@ -84,18 +89,22 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode,
         }
     }
 
-    if (user && msg.type === 'GAME_OVER_SUMMARY') {
-        const isTeam = gameState?.isTeamsMode ? 'team' : 'solo';
+    if (msg.type === 'GAME_OVER_SUMMARY') {
+        setGameEnded(true);
         const isWinner = msg.payload.winners.includes(playerId);
-        
-        AuthService.updateStats(
-            isTeam,
-            {
-                gamesPlayed: 1,
-                gamesWon: isWinner ? 1 : 0,
-                bestGameScore: sessionStats.current.pointsEarned // Logic inside AuthService handles max() check
-            }
-        );
+        setAmIWinner(isWinner);
+
+        if (user) {
+            const isTeam = gameState?.isTeamsMode ? 'team' : 'solo';
+            AuthService.updateStats(
+                isTeam,
+                {
+                    gamesPlayed: 1,
+                    gamesWon: isWinner ? 1 : 0,
+                    bestGameScore: sessionStats.current.pointsEarned // Logic inside AuthService handles max() check
+                }
+            );
+        }
     }
   });
 
@@ -150,7 +159,37 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode,
       sendMessage({ type: 'JOIN_TEAM', payload: { teamId, playerId } });
   };
 
-  // 1. Render Login
+  // 1. GAME OVER VIEW
+  if (gameEnded) {
+      return (
+          <div className="h-screen bg-gradient-to-b from-blue-900 to-black flex flex-col items-center justify-center p-6 text-center text-white">
+              <div className={`p-6 rounded-full bg-black/30 mb-6 border-4 ${amIWinner ? 'border-jeopardy-gold' : 'border-gray-700'}`}>
+                  <Trophy size={64} className={`${amIWinner ? 'text-jeopardy-gold animate-bounce' : 'text-gray-500'}`} />
+              </div>
+              <h1 className="text-4xl font-display mb-2">{amIWinner ? 'VICTORY!' : 'GAME OVER'}</h1>
+              <p className="text-blue-200 mb-8">The host has ended the session.</p>
+              
+              <div className="flex flex-col gap-4 w-full max-w-xs">
+                  {user && onViewStats && (
+                      <button 
+                        onClick={onViewStats}
+                        className="bg-jeopardy-gold hover:bg-yellow-300 text-black font-bold py-4 rounded-lg shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-105"
+                      >
+                          <Award size={20} /> View My Stats
+                      </button>
+                  )}
+                  <button 
+                    onClick={onBack}
+                    className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-4 rounded-lg shadow-lg flex items-center justify-center gap-2"
+                  >
+                      <LogOut size={20} /> Main Menu
+                  </button>
+              </div>
+          </div>
+      );
+  }
+
+  // 2. Render Login
   if (!joined) {
     return (
       <div className="h-screen bg-gradient-to-b from-blue-900 to-black flex items-center justify-center p-6 relative">
@@ -207,7 +246,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode,
     );
   }
 
-  // 2. Render Connecting
+  // 3. Render Connecting
   if (!gameState) {
     return (
       <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center">
@@ -230,7 +269,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode,
     );
   }
 
-  // 3. Render Team Selection (If in Teams Mode and not yet in a team)
+  // 4. Render Team Selection (If in Teams Mode and not yet in a team)
   if (gameState.phase === GamePhase.LOBBY && gameState.isTeamsMode && !myTeam) {
       return (
         <div className="h-screen bg-blue-900 text-white p-6 overflow-y-auto">
@@ -286,7 +325,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, initialCode,
       );
   }
 
-  // 4. Render Lobby Waiting (Standard or Post-Team Selection)
+  // 5. Render Lobby Waiting (Standard or Post-Team Selection)
   if (gameState.phase === GamePhase.LOBBY) {
       return (
         <div className="h-screen bg-blue-900 text-white flex flex-col items-center justify-center p-6 text-center">

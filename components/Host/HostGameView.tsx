@@ -197,7 +197,11 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       }
 
       sendMessage({ type: 'GAME_OVER_SUMMARY', payload: { winners } });
-      onExit();
+      
+      // Give a moment for the message to propagate before killing connection
+      setTimeout(() => {
+        onExit();
+      }, 500);
   };
 
   const deleteTeam = (teamId: string) => {
