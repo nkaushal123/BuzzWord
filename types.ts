@@ -70,7 +70,8 @@ export enum GamePhase {
   BOARD = 'BOARD',
   QUESTION = 'QUESTION',
   ANSWER = 'ANSWER',
-  GAME_OVER = 'GAME_OVER'
+  GAME_OVER = 'GAME_OVER',
+  WAGER = 'WAGER'
 }
 
 export interface GameState {
