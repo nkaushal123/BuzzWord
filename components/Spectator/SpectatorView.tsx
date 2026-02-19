@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GameBoard, GameState, GamePhase, CommsMessage } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Trophy, Clock, Lock, Unlock, Youtube, RefreshCw, Loader } from 'lucide-react';
+import { Trophy, Clock, Lock, Unlock, Youtube, RefreshCw, Loader, Monitor, Wifi } from 'lucide-react';
 import QRCode from 'qrcode';
 
 interface SpectatorViewProps {
@@ -21,12 +21,10 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
   const [board, setBoard] = useState<GameBoard | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
-  const [connectionStatus, setConnectionStatus] = useState('Initializing...');
   const [dataReceived, setDataReceived] = useState({ board: false, state: false });
-  const [error, setError] = useState<string | null>(null);
-
-  // Connect as SPECTATOR
-  const { sendMessage, isConnected } = useComms(lobbyCode, 'SPECTATOR', (msg: CommsMessage) => {
+  
+  // Connect as SPECTATOR with new Comms hook that supports Local Broadcast
+  const { sendMessage, isConnected, connectionType } = useComms(lobbyCode, 'SPECTATOR', (msg: CommsMessage) => {
       if (msg.type === 'HOST_SYNC') {
           setGameState(msg.payload);
           setDataReceived(prev => ({ ...prev, state: true }));
@@ -47,14 +45,12 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
       }
   });
 
-  // Connection Status Effects
+  // Request Data Effect
   useEffect(() => {
       if (isConnected) {
-          setConnectionStatus('Connected to Host. Requesting Game Data...');
-          // Request Board on Connect
           sendMessage({ type: 'SPECTATOR_JOIN', payload: null });
           
-          // Retry request every 2 seconds if data hasn't arrived
+          // Retry logic: If local channel, this is instant. If PeerJS, might need a retry.
           const interval = setInterval(() => {
              if (!dataReceived.board || !dataReceived.state) {
                  console.log("Retrying data request...");
@@ -62,34 +58,22 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
              } else {
                  clearInterval(interval);
              }
-          }, 2000);
+          }, 1000);
 
           return () => clearInterval(interval);
-      } else {
-          setConnectionStatus('Searching for Host...');
       }
-  }, [isConnected, sendMessage, dataReceived.board, dataReceived.state]);
+  }, [isConnected, sendMessage, dataReceived]);
 
-  // Generate QR - Wrapped in Try/Catch to prevent crash
+  // Generate QR
   useEffect(() => {
     try {
         if (lobbyCode) {
             const url = `${window.location.origin}?code=${lobbyCode}`;
             QRCode.toDataURL(url, { width: 512, margin: 2, color: { dark: '#000000', light: '#ffffff' } })
-                .then(setQrCodeDataUrl)
-                .catch(err => {
-                    console.error("QR Generation Error:", err);
-                    // Non-fatal, just log
-                });
+                .then(setQrCodeDataUrl);
         }
-    } catch (e) {
-        console.error("QR Crash:", e);
-    }
+    } catch (e) { console.error(e); }
   }, [lobbyCode]);
-
-  const handleManualRefresh = () => {
-      window.location.reload();
-  };
 
   // Derived State
   const participants = gameState?.isTeamsMode ? gameState.teams : gameState.players || [];
@@ -107,59 +91,40 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
       : null;
 
   // --- LOADING SCREEN ---
-  // Using explicit bright colors to debug visibility issues
   if (!gameState || !board) {
       return (
-          <div className="h-screen w-screen bg-blue-900 text-white flex flex-col items-center justify-center p-8 fixed inset-0 z-50">
-              <div className="text-center max-w-lg bg-black/50 p-8 rounded-xl backdrop-blur-sm border border-white/10">
-                  <h1 className="text-4xl font-display text-jeopardy-gold mb-6 tracking-widest">
-                      SPECTATOR VIEW
+          <div className="h-screen w-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8 fixed inset-0 z-50 font-sans">
+              <div className="text-center max-w-lg w-full bg-gray-900 border border-gray-800 p-8 rounded-2xl shadow-2xl">
+                  <h1 className="text-3xl font-display text-jeopardy-gold mb-8 tracking-widest uppercase">
+                      TV View Setup
                   </h1>
                   
-                  <div className="flex flex-col gap-4 mb-8">
-                      <div className="flex items-center justify-center gap-3">
-                          <Loader className="animate-spin text-blue-300" />
-                          <span className="font-bold text-lg">{connectionStatus}</span>
+                  <div className="space-y-6">
+                      {/* Connection Step */}
+                      <div className={`flex items-center gap-4 p-4 rounded-xl border ${isConnected ? 'bg-green-900/20 border-green-800' : 'bg-yellow-900/20 border-yellow-800'}`}>
+                          {isConnected ? <Monitor className="text-green-500 w-8 h-8" /> : <Loader className="animate-spin text-yellow-500 w-8 h-8" />}
+                          <div className="text-left">
+                              <h3 className="font-bold text-lg">{isConnected ? 'Connected to Host' : 'Searching for Host...'}</h3>
+                              <p className="text-xs text-gray-400">
+                                  {connectionType === 'LOCAL' ? 'Via Local Link (Fast)' : connectionType === 'PEER' ? 'Via Internet (PeerJS)' : 'Waiting...'}
+                              </p>
+                          </div>
                       </div>
-                      
-                      <div className="text-left bg-black/40 p-4 rounded text-sm font-mono space-y-2">
-                          <div className="flex justify-between">
-                              <span className="text-gray-400">Lobby Code:</span>
-                              <span className="text-white font-bold">{lobbyCode}</span>
-                          </div>
-                          <div className="flex justify-between">
-                              <span className="text-gray-400">Connection:</span>
-                              <span className={isConnected ? "text-green-400" : "text-yellow-400"}>
-                                  {isConnected ? 'Active' : 'Pending...'}
-                              </span>
-                          </div>
-                          <div className="flex justify-between">
-                              <span className="text-gray-400">Game State:</span>
-                              <span className={dataReceived.state ? "text-green-400" : "text-gray-500"}>
-                                  {dataReceived.state ? 'OK' : 'Waiting...'}
-                              </span>
-                          </div>
-                          <div className="flex justify-between">
-                              <span className="text-gray-400">Board Data:</span>
-                              <span className={dataReceived.board ? "text-green-400" : "text-gray-500"}>
-                                  {dataReceived.board ? 'OK' : 'Waiting...'}
-                              </span>
+
+                      {/* Data Step */}
+                      <div className={`flex items-center gap-4 p-4 rounded-xl border ${dataReceived.state ? 'bg-green-900/20 border-green-800' : 'bg-gray-800/50 border-gray-700'}`}>
+                          {dataReceived.state ? <Wifi className="text-green-500 w-8 h-8" /> : <Loader className="animate-spin text-gray-500 w-8 h-8" />}
+                          <div className="text-left">
+                              <h3 className="font-bold text-lg">{dataReceived.state ? 'Game Data Received' : 'Waiting for Data...'}</h3>
+                              <p className="text-xs text-gray-400">Syncing board and scores</p>
                           </div>
                       </div>
                   </div>
 
-                  {error && (
-                      <div className="mb-4 p-2 bg-red-900/50 text-red-200 text-sm rounded">
-                          {error}
-                      </div>
-                  )}
-
-                  <button 
-                    onClick={handleManualRefresh}
-                    className="flex items-center justify-center gap-2 mx-auto px-6 py-2 bg-white/10 hover:bg-white/20 rounded transition-colors"
-                  >
-                      <RefreshCw size={16} /> Reload Page
-                  </button>
+                  <div className="mt-8 pt-6 border-t border-gray-800 text-sm text-gray-500">
+                      <p>Lobby Code: <span className="font-mono text-white font-bold">{lobbyCode}</span></p>
+                      {!isConnected && <p className="mt-2 text-yellow-500 animate-pulse">Ensure the Host tab is open on this computer.</p>}
+                  </div>
               </div>
           </div>
       );
@@ -168,7 +133,7 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
   // --- LOBBY PHASE ---
   if (gameState.phase === GamePhase.LOBBY) {
       return (
-        <div className="h-screen bg-gradient-to-br from-blue-900 to-black text-white p-12 flex flex-col items-center justify-center relative overflow-hidden">
+        <div className="h-screen bg-gradient-to-br from-blue-900 to-black text-white p-12 flex flex-col items-center justify-center relative overflow-hidden font-sans">
             {/* Background Ambience */}
             <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-500 via-black to-black"></div>
             
@@ -178,7 +143,7 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
                     <h1 className="text-8xl font-display text-jeopardy-gold mb-6 drop-shadow-lg tracking-wider">
                         {board.title}
                     </h1>
-                    <div className="bg-white/10 backdrop-blur-md p-8 rounded-3xl border border-white/20 inline-block mb-12">
+                    <div className="bg-white/10 backdrop-blur-md p-8 rounded-3xl border border-white/20 inline-block mb-12 shadow-2xl">
                          <p className="text-xl uppercase tracking-widest text-blue-300 mb-2">Join at {window.location.host}</p>
                          <div className="text-9xl font-mono font-bold text-white tracking-widest drop-shadow-2xl">
                              {lobbyCode}
@@ -188,24 +153,18 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
                 
                 {/* Right: QR */}
                 <div className="bg-white p-4 rounded-3xl shadow-2xl transform rotate-3">
-                    {qrCodeDataUrl ? (
-                        <img src={qrCodeDataUrl} className="w-[400px] h-[400px]" alt="Join QR" />
-                    ) : (
-                        <div className="w-[400px] h-[400px] flex items-center justify-center text-black">
-                            Loading QR...
-                        </div>
-                    )}
+                    {qrCodeDataUrl && <img src={qrCodeDataUrl} className="w-[400px] h-[400px]" alt="Join QR" />}
                 </div>
             </div>
 
             {/* Player List ticker */}
             <div className="absolute bottom-0 left-0 w-full bg-black/50 backdrop-blur-md border-t border-gray-800 p-6">
                 <div className="flex justify-center gap-8 flex-wrap">
-                    {participants.length === 0 && <span className="text-gray-500 animate-pulse italic">Waiting for players...</span>}
+                    {participants.length === 0 && <span className="text-gray-500 animate-pulse italic text-xl">Waiting for players to join...</span>}
                     {participants.map(p => (
-                        <div key={p.id} className="flex items-center gap-2 bg-blue-900/50 px-4 py-2 rounded-full border border-blue-500/30">
+                        <div key={p.id} className="flex items-center gap-2 bg-blue-900/50 px-6 py-3 rounded-full border border-blue-500/30 shadow-lg animate-in fade-in slide-in-from-bottom-4">
                             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                            <span className="font-bold text-lg">{p.name}</span>
+                            <span className="font-bold text-2xl">{p.name}</span>
                         </div>
                     ))}
                 </div>
@@ -220,7 +179,7 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
       const winner = sorted[0];
 
       return (
-        <div className="h-screen bg-gray-900 text-white flex flex-col items-center justify-center relative overflow-hidden">
+        <div className="h-screen bg-gray-900 text-white flex flex-col items-center justify-center relative overflow-hidden font-sans">
              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10"></div>
              
              <Trophy size={120} className="text-jeopardy-gold mb-8 drop-shadow-[0_0_50px_rgba(255,215,0,0.6)] animate-bounce" />
