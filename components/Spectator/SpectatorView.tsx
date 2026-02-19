@@ -23,6 +23,7 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [connectionStatus, setConnectionStatus] = useState('Initializing...');
   const [dataReceived, setDataReceived] = useState({ board: false, state: false });
+  const [error, setError] = useState<string | null>(null);
 
   // Connect as SPECTATOR
   const { sendMessage, isConnected } = useComms(lobbyCode, 'SPECTATOR', (msg: CommsMessage) => {
@@ -52,16 +53,38 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
           setConnectionStatus('Connected to Host. Requesting Game Data...');
           // Request Board on Connect
           sendMessage({ type: 'SPECTATOR_JOIN', payload: null });
+          
+          // Retry request every 2 seconds if data hasn't arrived
+          const interval = setInterval(() => {
+             if (!dataReceived.board || !dataReceived.state) {
+                 console.log("Retrying data request...");
+                 sendMessage({ type: 'SPECTATOR_JOIN', payload: null });
+             } else {
+                 clearInterval(interval);
+             }
+          }, 2000);
+
+          return () => clearInterval(interval);
       } else {
           setConnectionStatus('Searching for Host...');
       }
-  }, [isConnected, sendMessage]);
+  }, [isConnected, sendMessage, dataReceived.board, dataReceived.state]);
 
-  // Generate QR
+  // Generate QR - Wrapped in Try/Catch to prevent crash
   useEffect(() => {
-    const url = `${window.location.origin}?code=${lobbyCode}`;
-    QRCode.toDataURL(url, { width: 512, margin: 2, color: { dark: '#000000', light: '#ffffff' } })
-        .then(setQrCodeDataUrl);
+    try {
+        if (lobbyCode) {
+            const url = `${window.location.origin}?code=${lobbyCode}`;
+            QRCode.toDataURL(url, { width: 512, margin: 2, color: { dark: '#000000', light: '#ffffff' } })
+                .then(setQrCodeDataUrl)
+                .catch(err => {
+                    console.error("QR Generation Error:", err);
+                    // Non-fatal, just log
+                });
+        }
+    } catch (e) {
+        console.error("QR Crash:", e);
+    }
   }, [lobbyCode]);
 
   const handleManualRefresh = () => {
@@ -84,51 +107,58 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
       : null;
 
   // --- LOADING SCREEN ---
+  // Using explicit bright colors to debug visibility issues
   if (!gameState || !board) {
       return (
-          <div className="h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8">
-              <div className="text-center max-w-lg">
-                  <h1 className="text-5xl font-display text-jeopardy-gold mb-8 tracking-widest">
+          <div className="h-screen w-screen bg-blue-900 text-white flex flex-col items-center justify-center p-8 fixed inset-0 z-50">
+              <div className="text-center max-w-lg bg-black/50 p-8 rounded-xl backdrop-blur-sm border border-white/10">
+                  <h1 className="text-4xl font-display text-jeopardy-gold mb-6 tracking-widest">
                       SPECTATOR VIEW
                   </h1>
                   
-                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 shadow-2xl mb-8">
-                      <div className="flex items-center justify-center gap-3 mb-4 text-blue-400">
-                          <Loader className="animate-spin" />
+                  <div className="flex flex-col gap-4 mb-8">
+                      <div className="flex items-center justify-center gap-3">
+                          <Loader className="animate-spin text-blue-300" />
                           <span className="font-bold text-lg">{connectionStatus}</span>
                       </div>
                       
-                      <div className="space-y-2 text-sm text-gray-500 font-mono">
+                      <div className="text-left bg-black/40 p-4 rounded text-sm font-mono space-y-2">
                           <div className="flex justify-between">
-                              <span>Lobby Code:</span>
+                              <span className="text-gray-400">Lobby Code:</span>
                               <span className="text-white font-bold">{lobbyCode}</span>
                           </div>
                           <div className="flex justify-between">
-                              <span>Connection:</span>
-                              <span className={isConnected ? "text-green-500" : "text-yellow-500"}>
-                                  {isConnected ? 'Active' : 'Pending'}
+                              <span className="text-gray-400">Connection:</span>
+                              <span className={isConnected ? "text-green-400" : "text-yellow-400"}>
+                                  {isConnected ? 'Active' : 'Pending...'}
                               </span>
                           </div>
                           <div className="flex justify-between">
-                              <span>Game State:</span>
-                              <span className={dataReceived.state ? "text-green-500" : "text-gray-600"}>
-                                  {dataReceived.state ? 'Received' : 'Waiting...'}
+                              <span className="text-gray-400">Game State:</span>
+                              <span className={dataReceived.state ? "text-green-400" : "text-gray-500"}>
+                                  {dataReceived.state ? 'OK' : 'Waiting...'}
                               </span>
                           </div>
                           <div className="flex justify-between">
-                              <span>Board Data:</span>
-                              <span className={dataReceived.board ? "text-green-500" : "text-gray-600"}>
-                                  {dataReceived.board ? 'Received' : 'Waiting...'}
+                              <span className="text-gray-400">Board Data:</span>
+                              <span className={dataReceived.board ? "text-green-400" : "text-gray-500"}>
+                                  {dataReceived.board ? 'OK' : 'Waiting...'}
                               </span>
                           </div>
                       </div>
                   </div>
 
+                  {error && (
+                      <div className="mb-4 p-2 bg-red-900/50 text-red-200 text-sm rounded">
+                          {error}
+                      </div>
+                  )}
+
                   <button 
                     onClick={handleManualRefresh}
-                    className="flex items-center justify-center gap-2 mx-auto text-gray-500 hover:text-white transition-colors"
+                    className="flex items-center justify-center gap-2 mx-auto px-6 py-2 bg-white/10 hover:bg-white/20 rounded transition-colors"
                   >
-                      <RefreshCw size={16} /> Force Reload
+                      <RefreshCw size={16} /> Reload Page
                   </button>
               </div>
           </div>
@@ -158,7 +188,13 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
                 
                 {/* Right: QR */}
                 <div className="bg-white p-4 rounded-3xl shadow-2xl transform rotate-3">
-                    <img src={qrCodeDataUrl} className="w-[400px] h-[400px]" alt="Join QR" />
+                    {qrCodeDataUrl ? (
+                        <img src={qrCodeDataUrl} className="w-[400px] h-[400px]" alt="Join QR" />
+                    ) : (
+                        <div className="w-[400px] h-[400px] flex items-center justify-center text-black">
+                            Loading QR...
+                        </div>
+                    )}
                 </div>
             </div>
 
