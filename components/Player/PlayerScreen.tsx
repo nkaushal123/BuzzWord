@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useComms } from '../../services/comms';
 import { AuthService } from '../../services/auth';
 import { GameState, GamePhase, CommsMessage, Team, User } from '../../types';
-import { Circle, User as UserIcon, Trophy, Lock, Hash, ArrowLeft, Users, Shield, Plus, Award, LogOut, Clock, Star } from 'lucide-react';
+import { Circle, User as UserIcon, Trophy, Lock, Hash, ArrowLeft, Users, Shield, Plus, Award, LogOut, Clock } from 'lucide-react';
 
 interface PlayerScreenProps {
   onBack?: () => void;
@@ -27,6 +27,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
   const [amIWinner, setAmIWinner] = useState(false);
 
   // Fast Path Latency Optimization
+  // We use this to override the slow synced gameState.buzzLocked value temporarily
   const [localBuzzerOverride, setLocalBuzzerOverride] = useState<boolean | null>(null);
 
   // Local Stats Tracking Session (to accumulate before saving)
@@ -44,6 +45,9 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
   const { sendMessage, isConnected } = useComms(activeLobbyCode, 'PLAYER', (msg: CommsMessage) => {
     if (msg.type === 'HOST_SYNC') {
       setGameState(msg.payload);
+      
+      // When the full sync arrives, we can generally clear the fast-path override
+      // unless it conflicts significantly, but usually the sync is the source of truth eventually.
       setLocalBuzzerOverride(null); 
       
       const me = msg.payload.players.find(p => p.id === playerId);
@@ -58,6 +62,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
       }
     }
 
+    // Handle Kicked
     if (msg.type === 'KICK_PLAYER') {
         if (msg.payload.playerId === playerId) {
             alert("You have been kicked from the game.");
@@ -67,10 +72,12 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
         }
     }
 
+    // Handle Fast Buzzer Status (Latency Fix)
     if (msg.type === 'BUZZER_STATUS') {
         setLocalBuzzerOverride(msg.payload.isOpen);
     }
 
+    // Handle lightweight time sync to avoid laggy timer
     if (msg.type === 'TIME_SYNC') {
         setGameState(prev => prev ? { ...prev, timer: msg.payload.timer, timerMode: msg.payload.timerMode } : null);
     }
@@ -80,6 +87,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
         if (msg.payload.playerId === playerId) {
             const isTeam = gameState?.isTeamsMode ? 'team' : 'solo';
             
+            // Session tracking
             if (msg.payload.correct) {
                 sessionStats.current.correct++;
                 sessionStats.current.pointsEarned += msg.payload.points;
@@ -88,6 +96,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
                 sessionStats.current.pointsEarned -= msg.payload.points;
             }
 
+            // Persistence
             AuthService.updateStats(
                 isTeam,
                 {
@@ -120,7 +129,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
                 {
                     gamesPlayed: 1,
                     gamesWon: isWinner ? 1 : 0,
-                    bestGameScore: sessionStats.current.pointsEarned
+                    bestGameScore: sessionStats.current.pointsEarned // Logic inside AuthService handles max() check
                 }
             );
         }
@@ -130,21 +139,26 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !lobbyCodeInput.trim()) return;
+    
+    // Set the active code which triggers the comms hook
     const code = lobbyCodeInput.toUpperCase().trim();
     setActiveLobbyCode(code);
     setJoined(true);
   };
 
+  // Initial Join Request
   useEffect(() => {
     if (joined && isConnected && name) {
         sendMessage({ type: 'PLAYER_JOIN', payload: { id: playerId, name } });
     }
   }, [joined, isConnected, name, playerId, sendMessage]);
 
+  // Self-Healing
   useEffect(() => {
     if (joined && isConnected && gameState && name) {
         const amIRegistered = gameState.players.some(p => p.id === playerId);
         if (!amIRegistered) {
+            // Only heal if we haven't been explicitly kicked (logic handled by KICK_PLAYER message setting joined=false)
             const timeout = setTimeout(() => {
                 sendMessage({ type: 'PLAYER_JOIN', payload: { id: playerId, name } });
             }, 2000); 
@@ -155,12 +169,17 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
 
   const handleBuzz = () => {
     if (!gameState) return;
+    
+    // Check lock state (Prefer fast override if available)
     const isLocked = localBuzzerOverride !== null ? !localBuzzerOverride : gameState.buzzLocked;
+
     if (isLocked) return;
     if (gameState.phase !== GamePhase.QUESTION) return;
     if (gameState.buzzedPlayerId) return;
 
+    // Fast Path: Lock locally immediately so user feels instant response
     setLocalBuzzerOverride(false); 
+
     sendMessage({ type: 'BUZZ', payload: { playerId } });
   };
 
@@ -366,34 +385,6 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ onBack, onViewStats,
             </div>
         </div>
       )
-  }
-
-  // 6. DAILY DOUBLE WAGER VIEW
-  if (gameState.phase === GamePhase.WAGER) {
-      const buzzedPlayerId = gameState.buzzedPlayerId;
-      const isMyTurn = playerId === buzzedPlayerId;
-      const isMyTeamTurn = gameState.isTeamsMode && myTeam && gameState.teams.find(t => t.id === myTeam.id && t.members.includes(buzzedPlayerId || ''))?.id === myTeam.id;
-
-      return (
-          <div className="h-screen bg-blue-900 flex flex-col items-center justify-center p-6 text-center text-white">
-              <div className="animate-pulse mb-8">
-                  <Star className="w-24 h-24 text-jeopardy-gold fill-current" />
-              </div>
-              <h1 className="text-4xl font-display uppercase mb-4">Daily Double!</h1>
-              
-              {isMyTurn || isMyTeamTurn ? (
-                  <div className="bg-white/10 p-6 rounded-xl border-2 border-jeopardy-gold">
-                      <p className="text-xl font-bold mb-2">It's Your Wager!</p>
-                      <p className="text-sm text-blue-200">The host is entering your wager amount on the main screen.</p>
-                      <p className="text-xs text-gray-400 mt-4">Good luck!</p>
-                  </div>
-              ) : (
-                  <div className="opacity-70">
-                      <p className="text-xl">Waiting for wager...</p>
-                  </div>
-              )}
-          </div>
-      );
   }
 
   // Game Logic variables
