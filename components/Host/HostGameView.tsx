@@ -3,6 +3,8 @@ import QRCode from 'qrcode';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
+import { WindowPortal } from './WindowPortal';
+import { SpectatorRenderer } from '../Spectator/SpectatorRenderer';
 import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal, Mic, MicOff, Sparkles, Youtube, StopCircle, UserMinus, Monitor, MonitorCheck } from 'lucide-react';
 
 interface HostGameViewProps {
@@ -26,14 +28,6 @@ const ScoreDisplay: React.FC<{ score: number; className?: string }> = ({ score, 
             {score < 0 ? '-' : ''}${Math.abs(score)}
         </span>
     );
-};
-
-// --- HELPER FOR YOUTUBE ---
-const getYoutubeId = (url: string | undefined) => {
-    if (!url) return null;
-    const regExp = /^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|shorts\/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[1].length === 11) ? match[1] : null;
 };
 
 export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, onExit }) => {
@@ -73,7 +67,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [isQrExpanded, setIsQrExpanded] = useState(false);
   const [showDetailedStats, setShowDetailedStats] = useState(false); 
-  const [isSpectatorConnected, setIsSpectatorConnected] = useState(false);
+  
+  // PORTAL TV MODE STATE
+  const [showTvMode, setShowTvMode] = useState(false);
 
   // --- AUDIO STATE ---
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -148,35 +144,24 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
 
   // --- AUTO START LISTENING EFFECT ---
   useEffect(() => {
-    // Only auto-start if:
-    // 1. We are in Question Phase
-    // 2. We have a question loaded
-    // 3. Buzzers are still locked (meaning we haven't opened them yet)
     if (phase === GamePhase.QUESTION && currentQuestion && buzzLocked) {
         const hasText = currentQuestion.q.question && currentQuestion.q.question.trim().length > 0;
 
         if (!hasText) {
-             // Case: Image Only / No Text -> Auto-open buzzers
-             // We use a timeout to allow the transition animation to play out (e.g. 1.5s)
              const timer = setTimeout(() => {
                  handleUnlockBuzzers();
              }, 1500);
              return () => clearTimeout(timer);
         } else if (!isListening) {
-            // Case: Has Text -> Use Speech Recognition
             startListening();
         }
     }
   }, [phase, currentQuestion, buzzLocked]);
 
   const { sendMessage } = useComms(lobbyCode, 'HOST', (msg: CommsMessage) => {
-    // Spectator Handling
+    // Spectator Handling (For remote connections)
     if (msg.type === 'SPECTATOR_JOIN') {
-        console.log("Spectator joined! Sending sync...");
-        setIsSpectatorConnected(true);
-        // Send the board immediately to the new spectator
         sendMessage({ type: 'BOARD_SYNC', payload: board });
-        // Also ensure they get current state
         sendMessage({ type: 'HOST_SYNC', payload: getCurrentGameState() });
     }
 
@@ -205,10 +190,8 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
             stopListening(); // Stop listening if someone buzzes
             setIsPlayingAudio(false); // Stop YouTube audio on buzz
             
-            // Send fast update to lock screens immediately
             sendMessage({ type: 'BUZZER_STATUS', payload: { isOpen: false } });
 
-            // TIMER: Switch to 5 second answer timer
             setTimerMode('ANSWER');
             setTimer(5);
         }
@@ -251,9 +234,9 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       blockedTeamIds
   ]);
 
-  const openSpectatorView = () => {
-      const url = `${window.location.origin}?code=${lobbyCode}&role=spectator`;
-      window.open(url, '_blank', 'width=1280,height=720');
+  // TOGGLE TV MODE
+  const toggleTvMode = () => {
+      setShowTvMode(!showTvMode);
   };
 
   const startGame = () => {
@@ -267,7 +250,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
           stopListening();
           setIsPlayingAudio(false);
           
-          // Calculate winners
           const participants = isTeamsMode ? teams : players;
           const maxScore = Math.max(...participants.map(p => p.score));
           const winners = participants.filter(p => p.score === maxScore).map(p => p.id);
@@ -283,19 +265,15 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     e.stopPropagation();
     if (!window.confirm("Kick this player?")) return;
 
-    // Send kick message to player
     sendMessage({ type: 'KICK_PLAYER', payload: { playerId } });
 
-    // Update state to remove player
     setPlayers(prev => prev.filter(p => p.id !== playerId));
     
-    // Also remove from teams if applicable
     setTeams(prev => prev.map(t => ({
         ...t,
         members: t.members.filter(id => id !== playerId)
     })));
 
-    // If they were currently buzzed in, reset
     if (buzzedPlayerId === playerId) {
         setBuzzedPlayerId(null);
         setBuzzLocked(false);
@@ -305,7 +283,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const handleQuestionSelect = (catId: string, q: Question) => {
     if (answeredQuestions.includes(q.id)) return;
     
-    // Stop any previous instance first to ensure clean state
     stopListening();
     setIsPlayingAudio(false);
     
@@ -321,10 +298,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     if (q.isDailyDouble) {
         soundService.play('DAILY_DOUBLE');
     }
-    // Auto-start is handled by useEffect
   };
-
-  // --- SPEECH RECOGNITION FUNCTIONS ---
 
   const stopListening = () => {
       if (recognitionRef.current) {
@@ -337,38 +311,22 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const startListening = () => {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-      if (!SpeechRecognition) {
-          // console.warn("Speech recognition not supported in this browser.");
-          return;
-      }
+      if (!SpeechRecognition) return;
 
-      // If already listening, don't double start
       if (recognitionRef.current) return;
 
       try {
           const recognition = new SpeechRecognition();
           recognition.lang = 'en-US';
-          recognition.continuous = false; // We want to detect the *end* of a phrase
+          recognition.continuous = false;
           recognition.interimResults = false;
 
-          recognition.onstart = () => {
-              setIsListening(true);
-          };
-
-          // This fires when the user stops talking
+          recognition.onstart = () => setIsListening(true);
           recognition.onspeechend = () => {
-              // The browser detected speech ended. Unlock buzzers.
               handleUnlockBuzzers();
               stopListening();
           };
-
-          recognition.onerror = (event: any) => {
-              // 'no-speech' happens if they don't say anything for a while. 
-              // We just stop listening to avoid error loops.
-              console.log("Speech recognition error", event.error);
-              stopListening();
-          };
-
+          recognition.onerror = (event: any) => stopListening();
           recognition.onend = () => {
               setIsListening(false);
               recognitionRef.current = null;
@@ -377,20 +335,15 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
           recognition.start();
           recognitionRef.current = recognition;
       } catch (err) {
-          console.error("Failed to start speech recognition", err);
           setIsListening(false);
       }
   };
 
   const handleUnlockBuzzers = () => {
-    // FAST PATH: Send a lightweight message immediately before React state updates/syncs
-    // This dramatically reduces latency perception
     sendMessage({ type: 'BUZZER_STATUS', payload: { isOpen: true } });
-
     setBuzzLocked(false);
     setTimerMode('BUZZ');
     setTimer(10);
-    // Ensure mic is off
     stopListening();
   };
 
@@ -406,7 +359,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
       if (!lastAction) return;
       const { type, playerId, points, questionId, eventId } = lastAction;
 
-      // Revert Score
       if (isTeamsMode) {
           const team = teams.find(t => t.members.includes(playerId));
           if (team) {
@@ -422,15 +374,12 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
           }
       }
 
-      // Revert Question State if it was marked correct
       if (type === 'CORRECT') {
           setAnsweredQuestions(prev => prev.filter(id => id !== questionId));
       }
 
-      // Remove the event from history
       setGameEvents(prev => prev.filter(e => e.id !== eventId));
 
-      // Cleanup
       if (lastActionTimeoutRef.current) clearTimeout(lastActionTimeoutRef.current);
       setLastAction(null);
   };
@@ -444,7 +393,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
     const points = currentQuestion.q.points;
     const catTitle = board.categories.find(c => c.id === currentQuestion.catId)?.title || "Unknown";
     
-    // Store name for Undo Toast
     const playerName = isTeamsMode 
         ? teams.find(t => t.members.includes(buzzedPlayerId))?.name || 'Team' 
         : players.find(p => p.id === buzzedPlayerId)?.name || 'Player';
@@ -569,8 +517,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   };
 
   const handleReveal = () => {
-      // Instead of hacking the question string, we properly change state to ANSWER
-      // This allows the Spectator view to know it should render the answer
       setPhase(GamePhase.ANSWER);
   };
 
@@ -661,6 +607,20 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   return (
     <div className="flex h-screen bg-gray-900 text-white overflow-hidden font-sans relative">
       
+      {/* PORTAL TV WINDOW */}
+      {showTvMode && (
+          <WindowPortal closeWindowPortal={() => setShowTvMode(false)}>
+              <SpectatorRenderer 
+                  gameState={getCurrentGameState()} 
+                  board={board}
+                  lobbyCode={lobbyCode}
+                  qrCodeDataUrl={qrCodeDataUrl}
+                  isConnected={true} // It's always connected via shared memory
+                  statusMessage="TV Mode Active"
+              />
+          </WindowPortal>
+      )}
+
       {/* LEFT SIDEBAR: PARTICIPANTS & STATS */}
       <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col shadow-2xl z-20">
           
@@ -675,11 +635,11 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
               </div>
               
               <button 
-                onClick={openSpectatorView}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 mb-4 shadow-lg transition-transform active:scale-95"
+                onClick={toggleTvMode}
+                className={`w-full font-bold py-3 rounded-lg flex items-center justify-center gap-2 mb-4 shadow-lg transition-transform active:scale-95 ${showTvMode ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
               >
-                  {isSpectatorConnected ? <MonitorCheck size={18} className="text-green-300" /> : <Monitor size={18} />}
-                  {isSpectatorConnected ? 'TV Connected' : 'Open TV View'}
+                  {showTvMode ? <MonitorCheck size={18} className="text-white" /> : <Monitor size={18} />}
+                  {showTvMode ? 'TV Window Active' : 'Open TV View'}
               </button>
 
               <button onClick={handleEndGame} className="flex items-center gap-2 text-gray-400 hover:text-red-400 text-sm transition-colors">
