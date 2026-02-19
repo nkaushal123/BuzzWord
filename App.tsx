@@ -4,7 +4,6 @@ import { Dashboard } from './components/Host/Dashboard';
 import { BoardEditor } from './components/Editor/BoardEditor';
 import { HostGameView } from './components/Host/HostGameView';
 import { PlayerScreen } from './components/Player/PlayerScreen';
-import { SpectatorView } from './components/Spectator/SpectatorView';
 import { AuthScreen } from './components/Auth/AuthScreen';
 import { StatsScreen } from './components/Stats/StatsScreen';
 import { Help } from './components/Help';
@@ -12,7 +11,7 @@ import { DeviceSync } from './components/Sync/DeviceSync';
 import { GameBoard, User } from './types';
 import { AuthService } from './services/auth';
 
-type View = 'WELCOME' | 'AUTH' | 'STATS' | 'DASHBOARD' | 'EDITOR' | 'HOST_GAME' | 'PLAYER' | 'SPECTATOR' | 'HELP' | 'SYNC';
+type View = 'WELCOME' | 'AUTH' | 'STATS' | 'DASHBOARD' | 'EDITOR' | 'HOST_GAME' | 'PLAYER' | 'HELP' | 'SYNC';
 
 function App() {
   const [view, setView] = useState<View>('WELCOME');
@@ -24,23 +23,17 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const codeParam = params.get('code');
-    const roleParam = params.get('role');
-    
     const savedUser = AuthService.getCurrentUser();
+    
     if (savedUser) setCurrentUser(savedUser);
 
     if (codeParam) {
       setLobbyCode(codeParam.toUpperCase());
-      
-      if (roleParam === 'spectator') {
-          setView('SPECTATOR');
+      // If they have a code, go straight to Auth (or Player if logged in)
+      if (savedUser) {
+        setView('PLAYER');
       } else {
-        // If they have a code, go straight to Auth (or Player if logged in)
-        if (savedUser) {
-          setView('PLAYER');
-        } else {
-          setView('AUTH');
-        }
+        setView('AUTH');
       }
     }
   }, []);
@@ -171,10 +164,6 @@ function App() {
           lobbyCode={lobbyCode}
           onExit={() => setView('DASHBOARD')}
         />
-      )}
-
-      {view === 'SPECTATOR' && (
-          <SpectatorView lobbyCode={lobbyCode} />
       )}
 
       {view === 'PLAYER' && (

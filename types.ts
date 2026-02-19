@@ -100,8 +100,6 @@ export interface GameState {
 // Comms
 export type CommsMessage = 
   | { type: 'PLAYER_JOIN'; payload: { id: string; name: string } }
-  | { type: 'SPECTATOR_JOIN'; payload: null }
-  | { type: 'BOARD_SYNC'; payload: GameBoard }
   | { type: 'BUZZ'; payload: { playerId: string } }
   | { type: 'HOST_SYNC'; payload: GameState }
   | { type: 'AWARD_POINTS'; payload: { playerId: string; points: number } }
