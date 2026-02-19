@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GameBoard, GameState, GamePhase, CommsMessage } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Trophy, Clock, Lock, Unlock, Youtube } from 'lucide-react';
+import { Trophy, Clock, Lock, Unlock, Youtube, RefreshCw, Loader } from 'lucide-react';
 import QRCode from 'qrcode';
 
 interface SpectatorViewProps {
@@ -21,14 +21,18 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
   const [board, setBoard] = useState<GameBoard | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState('Initializing...');
+  const [dataReceived, setDataReceived] = useState({ board: false, state: false });
 
   // Connect as SPECTATOR
   const { sendMessage, isConnected } = useComms(lobbyCode, 'SPECTATOR', (msg: CommsMessage) => {
       if (msg.type === 'HOST_SYNC') {
           setGameState(msg.payload);
+          setDataReceived(prev => ({ ...prev, state: true }));
       }
       if (msg.type === 'BOARD_SYNC') {
           setBoard(msg.payload);
+          setDataReceived(prev => ({ ...prev, board: true }));
       }
       if (msg.type === 'BUZZ') {
           soundService.play('BUZZ');
@@ -42,10 +46,14 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
       }
   });
 
-  // Request Board on Connect
+  // Connection Status Effects
   useEffect(() => {
       if (isConnected) {
+          setConnectionStatus('Connected to Host. Requesting Game Data...');
+          // Request Board on Connect
           sendMessage({ type: 'SPECTATOR_JOIN', payload: null });
+      } else {
+          setConnectionStatus('Searching for Host...');
       }
   }, [isConnected, sendMessage]);
 
@@ -55,6 +63,10 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
     QRCode.toDataURL(url, { width: 512, margin: 2, color: { dark: '#000000', light: '#ffffff' } })
         .then(setQrCodeDataUrl);
   }, [lobbyCode]);
+
+  const handleManualRefresh = () => {
+      window.location.reload();
+  };
 
   // Derived State
   const participants = gameState?.isTeamsMode ? gameState.teams : gameState.players || [];
@@ -71,12 +83,53 @@ export const SpectatorView: React.FC<SpectatorViewProps> = ({ lobbyCode }) => {
           : gameState.players.find(p => p.id === gameState.buzzedPlayerId)?.name)
       : null;
 
+  // --- LOADING SCREEN ---
   if (!gameState || !board) {
       return (
-          <div className="h-screen bg-black text-white flex items-center justify-center">
-              <div className="text-center">
-                  <h1 className="text-4xl font-display text-jeopardy-gold animate-pulse mb-4">CONNECTING TO LOBBY...</h1>
-                  <p className="text-gray-500">Waiting for Host...</p>
+          <div className="h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8">
+              <div className="text-center max-w-lg">
+                  <h1 className="text-5xl font-display text-jeopardy-gold mb-8 tracking-widest">
+                      SPECTATOR VIEW
+                  </h1>
+                  
+                  <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 shadow-2xl mb-8">
+                      <div className="flex items-center justify-center gap-3 mb-4 text-blue-400">
+                          <Loader className="animate-spin" />
+                          <span className="font-bold text-lg">{connectionStatus}</span>
+                      </div>
+                      
+                      <div className="space-y-2 text-sm text-gray-500 font-mono">
+                          <div className="flex justify-between">
+                              <span>Lobby Code:</span>
+                              <span className="text-white font-bold">{lobbyCode}</span>
+                          </div>
+                          <div className="flex justify-between">
+                              <span>Connection:</span>
+                              <span className={isConnected ? "text-green-500" : "text-yellow-500"}>
+                                  {isConnected ? 'Active' : 'Pending'}
+                              </span>
+                          </div>
+                          <div className="flex justify-between">
+                              <span>Game State:</span>
+                              <span className={dataReceived.state ? "text-green-500" : "text-gray-600"}>
+                                  {dataReceived.state ? 'Received' : 'Waiting...'}
+                              </span>
+                          </div>
+                          <div className="flex justify-between">
+                              <span>Board Data:</span>
+                              <span className={dataReceived.board ? "text-green-500" : "text-gray-600"}>
+                                  {dataReceived.board ? 'Received' : 'Waiting...'}
+                              </span>
+                          </div>
+                      </div>
+                  </div>
+
+                  <button 
+                    onClick={handleManualRefresh}
+                    className="flex items-center justify-center gap-2 mx-auto text-gray-500 hover:text-white transition-colors"
+                  >
+                      <RefreshCw size={16} /> Force Reload
+                  </button>
               </div>
           </div>
       );

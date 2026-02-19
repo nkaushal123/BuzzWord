@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { GameBoard, GameState, Player, GamePhase, CommsMessage, Question, Team } from '../../types';
 import { useComms } from '../../services/comms';
 import { soundService } from '../../services/sound';
-import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal, Mic, MicOff, Sparkles, Youtube, StopCircle, UserMinus, Monitor } from 'lucide-react';
+import { Users, Lock, Unlock, Check, X, ArrowRight, LogOut, Wifi, Shield, Eye, Clock, Play, Trophy, Maximize, RotateCcw, BarChart2, Zap, Brain, AlertTriangle, TrendingUp, Medal, Mic, MicOff, Sparkles, Youtube, StopCircle, UserMinus, Monitor, MonitorCheck } from 'lucide-react';
 
 interface HostGameViewProps {
   board: GameBoard;
@@ -73,6 +73,7 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [isQrExpanded, setIsQrExpanded] = useState(false);
   const [showDetailedStats, setShowDetailedStats] = useState(false); 
+  const [isSpectatorConnected, setIsSpectatorConnected] = useState(false);
 
   // --- AUDIO STATE ---
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -80,6 +81,25 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   // --- SPEECH RECOGNITION STATE ---
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+
+  // Helper function to get state for sync (Defined BEFORE useComms to be safe)
+  const getCurrentGameState = (): GameState => ({
+      lobbyCode,
+      phase,
+      currentQuestionId: currentQuestion?.q.id || null,
+      currentCategoryId: currentQuestion?.catId || null,
+      answeredQuestions,
+      buzzedPlayerId,
+      buzzLocked,
+      players,
+      board: null, // Optimization: Spectators get board via BOARD_SYNC
+      isTeamsMode,
+      teams,
+      blockedPlayerIds,
+      blockedTeamIds,
+      timer,
+      timerMode
+  });
 
   // Generate QR Code on mount
   useEffect(() => {
@@ -152,6 +172,8 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
   const { sendMessage } = useComms(lobbyCode, 'HOST', (msg: CommsMessage) => {
     // Spectator Handling
     if (msg.type === 'SPECTATOR_JOIN') {
+        console.log("Spectator joined! Sending sync...");
+        setIsSpectatorConnected(true);
         // Send the board immediately to the new spectator
         sendMessage({ type: 'BOARD_SYNC', payload: board });
         // Also ensure they get current state
@@ -211,24 +233,6 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
             return team;
         }));
     }
-  });
-
-  const getCurrentGameState = (): GameState => ({
-      lobbyCode,
-      phase,
-      currentQuestionId: currentQuestion?.q.id || null,
-      currentCategoryId: currentQuestion?.catId || null,
-      answeredQuestions,
-      buzzedPlayerId,
-      buzzLocked,
-      players,
-      board: null, // Optimization: Spectators get board via BOARD_SYNC
-      isTeamsMode,
-      teams,
-      blockedPlayerIds,
-      blockedTeamIds,
-      timer,
-      timerMode
   });
 
   // Sync State
@@ -674,7 +678,8 @@ export const HostGameView: React.FC<HostGameViewProps> = ({ board, lobbyCode, on
                 onClick={openSpectatorView}
                 className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 mb-4 shadow-lg transition-transform active:scale-95"
               >
-                  <Monitor size={18} /> Open TV View
+                  {isSpectatorConnected ? <MonitorCheck size={18} className="text-green-300" /> : <Monitor size={18} />}
+                  {isSpectatorConnected ? 'TV Connected' : 'Open TV View'}
               </button>
 
               <button onClick={handleEndGame} className="flex items-center gap-2 text-gray-400 hover:text-red-400 text-sm transition-colors">
