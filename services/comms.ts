@@ -7,7 +7,7 @@ const APP_PREFIX = 'buzzword-trivia-v1-';
 
 export const useComms = (
   lobbyCode: string, 
-  role: 'HOST' | 'PLAYER',
+  role: 'HOST' | 'PLAYER' | 'SPECTATOR',
   onMessage: (msg: CommsMessage) => void
 ) => {
   const peerRef = useRef<Peer | null>(null);
@@ -24,9 +24,10 @@ export const useComms = (
   useEffect(() => {
     if (!lobbyCode) return;
 
+    // HOST gets deterministic ID, Player/Spectator gets random
     const peerId = role === 'HOST' 
       ? `${APP_PREFIX}${lobbyCode.toUpperCase()}` 
-      : undefined; // Players get auto-generated ID
+      : undefined; 
 
     // Initialize Peer
     const peer = new Peer(peerId, {
@@ -42,7 +43,7 @@ export const useComms = (
         setIsConnected(true);
       }
 
-      if (role === 'PLAYER') {
+      if (role === 'PLAYER' || role === 'SPECTATOR') {
         // Connect to Host
         const hostId = `${APP_PREFIX}${lobbyCode.toUpperCase()}`;
         const conn = peer.connect(hostId, { reliable: true });
@@ -50,7 +51,6 @@ export const useComms = (
         conn.on('open', () => {
           console.log("Connected to Host");
           hostConnRef.current = conn;
-          // PLAYER is only ready when connection to host is open
           setIsConnected(true);
         });
 
@@ -77,7 +77,7 @@ export const useComms = (
     peer.on('connection', (conn) => {
       // Logic for HOST receiving connections
       if (role === 'HOST') {
-        console.log("Player connecting...", conn.peer);
+        console.log("Peer connecting...", conn.peer);
         
         conn.on('open', () => {
           // Avoid duplicate connections in the list
@@ -109,7 +109,7 @@ export const useComms = (
 
     return () => {
       // Cleanup
-      if (role === 'PLAYER' && hostConnRef.current) {
+      if ((role === 'PLAYER' || role === 'SPECTATOR') && hostConnRef.current) {
         hostConnRef.current.close();
       }
       if (role === 'HOST') {
